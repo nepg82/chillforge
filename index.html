@@ -305,6 +305,10 @@
     }
 
     async function setupAudio() {
+	// Configure existing context settings before starting audio
+	  Tone.context.lookAhead = 0.2;
+	  Tone.context.latencyHint = "playback";
+  
       await Tone.start();
 
       mainFilter = new Tone.Filter(2200, "lowpass").toDestination();

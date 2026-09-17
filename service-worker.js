@@ -6,22 +6,15 @@ const APP_SHELL = [
   "./manifest.json",
   "./app-icons/app-icon-192.png",
   "./app-icons/app-icon-512.png",
-  "https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"
+  "./Tone.js"
 ];
 
-// Install: pre-cache the app shell so it works offline immediately.
+// Install: Cache all assets cleanly
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return Promise.all(
-        APP_SHELL.map((url) =>
-          cache.add(new Request(url, { mode: "no-cors" })).catch(() => {
-            // Ignore individual failures (e.g. offline during install)
-          })
-        )
-      );
-    }).then(() => self.skipWaiting())
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
   );
+  self.skipWaiting();
 });
 
 // Activate: clean up old caches from previous versions.
