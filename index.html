@@ -77,6 +77,24 @@
       gap: 6px;
     }
 
+    .sub-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-left: 6px;
+      padding-left: 12px;
+      border-left: 2px solid var(--border);
+    }
+
+    .sub-group label {
+      font-size: 0.78rem;
+      color: var(--muted);
+    }
+
+    .sub-group label span {
+      color: var(--accent);
+    }
+
     label {
       font-size: 0.85rem;
       font-weight: 600;
@@ -183,8 +201,48 @@
     </div>
 
     <div class="control-group">
+      <label for="synthShape">Chords / Pad Shape</label>
+      <select id="synthShape">
+        <option value="triangle" selected>Triangle (Warm/Soft)</option>
+        <option value="sine">Sine (Pure/Mellow)</option>
+        <option value="fatsine">Fat Sine (Thick/Lush)</option>
+        <option value="sawtooth">Sawtooth (Bright/Buzzy)</option>
+        <option value="fatsawtooth">Fat Sawtooth (Thick/Analog)</option>
+        <option value="square">Square (Hollow/Retro)</option>
+      </select>
+    </div>
+
+    <div class="control-group">
       <label for="melodyVol">Melody Volume <span id="melodyVal">0 dB</span></label>
       <input type="range" id="melodyVol" min="-40" max="6" value="0">
+    </div>
+
+    <div class="control-group">
+      <label for="melodyShape">Melody Shape</label>
+      <select id="melodyShape">
+        <option value="sine" selected>Sine (Pure/Mellow)</option>
+        <option value="triangle">Triangle (Warm/Soft)</option>
+        <option value="fatsine">Fat Sine (Thick/Lush)</option>
+        <option value="sawtooth">Sawtooth (Bright/Buzzy)</option>
+        <option value="fatsawtooth">Fat Sawtooth (Thick/Analog)</option>
+        <option value="square">Square (Hollow/Retro)</option>
+      </select>
+    </div>
+
+    <div class="sub-group">
+      <label for="melodyShape2">+ Layer Shape</label>
+      <select id="melodyShape2">
+        <option value="none" selected>None (Single Shape Only)</option>
+        <option value="sine">Sine (Pure/Mellow)</option>
+        <option value="triangle">Triangle (Warm/Soft)</option>
+        <option value="fatsine">Fat Sine (Thick/Lush)</option>
+        <option value="sawtooth">Sawtooth (Bright/Buzzy)</option>
+        <option value="fatsawtooth">Fat Sawtooth (Thick/Analog)</option>
+        <option value="square">Square (Hollow/Retro)</option>
+      </select>
+
+      <label for="melodyLayerVol">Layer Volume <span id="melodyLayerVal">-8 dB</span></label>
+      <input type="range" id="melodyLayerVol" min="-40" max="6" value="-8">
     </div>
 
     <div class="control-group">
@@ -197,7 +255,7 @@
     let isPlaying = false;
     let isVinylOn = false;
 
-    let mainFilter, synth, melodySynth, kick, snare, hihat;
+    let mainFilter, synth, melodySynth, melodySynth2, kick, snare, hihat;
     let drumChannel, synthChannel, melodyChannel, vinylChannel;
     let vinylNoise, vinylFilter;
     let chordLoop, melodyLoop, drumLoop, crackleLoop;
@@ -226,6 +284,14 @@
     let currentProgression = progressions.jazz251;
     let chordIndex = 0;
 
+    // Tone.js needs a real waveform at synth-creation time; "none" only
+    // matters when deciding whether to trigger the layer, not what it's
+    // built with, so fall back to a harmless default here.
+    function getMelodyShape2OrFallback() {
+      const val = document.getElementById("melodyShape2").value;
+      return val === "none" ? "sine" : val;
+    }
+
     async function setupAudio() {
       await Tone.start();
 
@@ -241,7 +307,7 @@
       const synthLimiter = new Tone.Limiter(-3).connect(synthChannel);
 
 	  synth = new Tone.PolySynth(Tone.Synth, {
-	    oscillator: { type: "triangle" },
+	    oscillator: { type: document.getElementById("synthShape").value },
 	    envelope: { 
 	    	attack: 0.2,
 	    	decay: 0.8,
@@ -256,10 +322,20 @@
       // Multiple voices prevent a new note from cutting off a previous note.
       melodySynth = new Tone.PolySynth(Tone.Synth, {
         maxPolyphony: 4,
-        oscillator: { type: "sine" },
+        oscillator: { type: document.getElementById("melodyShape").value },
         envelope: { attack: 0.08, decay: 0.25, sustain: 0.55, release: 0.45 }
       }).connect(melodyChannel);
       melodySynth.volume.value = -8;
+
+      // Optional second voice, layered on top of melodySynth to combine two
+      // waveforms (e.g. sine + square) into one composite tone. Silent/unused
+      // whenever melodyShape2 is set to "none".
+      melodySynth2 = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 4,
+        oscillator: { type: getMelodyShape2OrFallback() },
+        envelope: { attack: 0.08, decay: 0.25, sustain: 0.55, release: 0.45 }
+      }).connect(melodyChannel);
+      melodySynth2.volume.value = parseFloat(document.getElementById("melodyLayerVol").value);
 
       // 3. Drums Engine
       kick = new Tone.MembraneSynth({
@@ -307,6 +383,10 @@
           const note = activeChord[Math.floor(Math.random() * activeChord.length)];
           const leadNote = Tone.Frequency(note).transpose(12).toNote();
           melodySynth.triggerAttackRelease(leadNote, "16n", time);
+
+          if (document.getElementById("melodyShape2").value !== "none") {
+            melodySynth2.triggerAttackRelease(leadNote, "16n", time);
+          }
         }
       }, "8n");
 
@@ -357,6 +437,9 @@
       drumChannel.volume.rampTo(parseFloat(document.getElementById("drumsVol").value), 0.05);
       synthChannel.volume.rampTo(parseFloat(document.getElementById("synthVol").value), 0.05);
       melodyChannel.volume.rampTo(parseFloat(document.getElementById("melodyVol").value), 0.05);
+      if (melodySynth2) {
+        melodySynth2.volume.rampTo(parseFloat(document.getElementById("melodyLayerVol").value), 0.05);
+      }
       
       const vinylVolVal = parseFloat(document.getElementById("vinylVol").value);
       if (vinylVolVal <= -58) {
@@ -440,7 +523,21 @@
       chordIndex = 0;
     });
 
-    ["drumsVol", "synthVol", "melodyVol", "vinylVol"].forEach(id => {
+    document.getElementById("synthShape").addEventListener("change", (e) => {
+      if (synth) synth.set({ oscillator: { type: e.target.value } });
+    });
+
+    document.getElementById("melodyShape").addEventListener("change", (e) => {
+      if (melodySynth) melodySynth.set({ oscillator: { type: e.target.value } });
+    });
+
+    document.getElementById("melodyShape2").addEventListener("change", (e) => {
+      if (melodySynth2 && e.target.value !== "none") {
+        melodySynth2.set({ oscillator: { type: e.target.value } });
+      }
+    });
+
+    ["drumsVol", "synthVol", "melodyVol", "melodyLayerVol", "vinylVol"].forEach(id => {
       document.getElementById(id).addEventListener("input", (e) => {
         document.getElementById(id.replace("Vol", "Val")).innerText = e.target.value + " dB";
         updateMixer();
