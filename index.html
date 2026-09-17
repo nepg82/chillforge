@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Chillforge</title>
+
+  <!-- PWA: manifest + icons -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+  <!-- PWA: theme + iOS standalone support -->
+  <meta name="theme-color" content="#1e1e24">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Chillforge">
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+  <style>
+    :root {
+      --bg: #1e1e24;
+      --card: #2b2b36;
+      --accent: #d4a373;
+      --text: #f4f4f6;
+      --muted: #a0a0b0;
+      --border: #3f3f4e;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+
+    .container {
+      background-color: var(--card);
+      padding: 28px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      font-weight: 600;
+      text-align: center;
+      color: var(--accent);
+      letter-spacing: 1px;
+    }
+
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+      margin-top: 4px;
+    }
+
+    .control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    label {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    label span {
+      color: var(--accent);
+    }
+
+    input[type=range], select {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 0.9rem;
+      outline: none;
+      box-sizing: border-box;
+    }
+
+    input[type=range] {
+      accent-color: var(--accent);
+      padding: 0;
+      height: 6px;
+      cursor: pointer;
+    }
+
+    .button-group {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      flex: 1;
+      background-color: var(--accent);
+      color: #1a1a1a;
+      border: none;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+    }
+
+    button.secondary {
+      background-color: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    button:hover { opacity: 0.9; }
+    button:active { transform: scale(0.98); }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1>Chillforge</h1>
+
+    <div class="button-group">
+      <button id="playBtn">Start Beat</button>
+      <button id="vinylBtn" class="secondary">Vinyl: OFF</button>
+    </div>
+
+    <div class="control-group">
+      <label for="modeSelect">Vibe / Mode</label>
+      <select id="modeSelect">
+        <option value="study">Read / Study (Standard Beat)</option>
+        <option value="calm">Calm Down (Muted Drums, Soft Synth)</option>
+        <option value="sleep">Deep Calm / Sleep (No Drums, Ambient)</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="progSelect">Chord Progression</label>
+      <select id="progSelect">
+        <option value="jazz251">ii7 - V7 - Imaj7 - VI7 (Jazz Standard)</option>
+        <option value="neoSoul">IVmaj7 - iii7 - ii7 - Imaj7 (Neo-Soul)</option>
+        <option value="sadLoFi">i7 - VImaj7 - IIImaj7 - VII7 (Melancholy)</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label for="bpmSlider">Tempo (BPM) <span id="bpmVal">83</span></label>
+      <input type="range" id="bpmSlider" min="55" max="95" value="83">
+    </div>
+
+    <div class="section-title">Channel Mixer</div>
+
+    <div class="control-group">
+      <label for="drumsVol">Drums Volume <span id="drumsVal">0 dB</span></label>
+      <input type="range" id="drumsVol" min="-40" max="6" value="0">
+    </div>
+
+    <div class="control-group">
+      <label for="synthVol">Chords / Pad Volume <span id="synthVal">0 dB</span></label>
+      <input type="range" id="synthVol" min="-40" max="6" value="0">
+    </div>
+
+    <div class="control-group">
+      <label for="melodyVol">Melody Volume <span id="melodyVal">0 dB</span></label>
+      <input type="range" id="melodyVol" min="-40" max="6" value="0">
+    </div>
+
+    <div class="control-group">
+      <label for="vinylVol">Vinyl Crackle Volume <span id="vinylVal">-20 dB</span></label>
+      <input type="range" id="vinylVol" min="-60" max="0" value="-20">
+    </div>
+  </div>
+
+  <script>
+    let isPlaying = false;
+    let isVinylOn = false;
+
+    let mainFilter, synth, melodySynth, kick, snare, hihat;
+    let drumChannel, synthChannel, melodyChannel, vinylChannel;
+    let vinylNoise, vinylFilter;
+    let chordLoop, melodyLoop, drumLoop, crackleLoop;
+
+    const progressions = {
+      jazz251: [
+        ["D3", "F3", "A3", "C4", "E4"],  // Dm9
+        ["G3", "B3", "D4", "F4"],        // G7
+        ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
+        ["A3", "C#4", "E4", "G4"]        // A7
+      ],
+      neoSoul: [
+        ["F3", "A3", "C4", "E4"],        // Fmaj7
+        ["E3", "G3", "B3", "D4"],        // Em7
+        ["D3", "F3", "A3", "C4"],        // Dm7
+        ["C3", "E3", "G3", "B3"]         // Cmaj7
+      ],
+      sadLoFi: [
+        ["A2", "C3", "E3", "G3"],        // Am7
+        ["F3", "A3", "C4", "E4"],        // Fmaj7
+        ["C3", "E3", "G3", "B3"],        // Cmaj7
+        ["G3", "B3", "D4", "F4"]         // G7
+      ]
+    };
+
+    let currentProgression = progressions.jazz251;
+    let chordIndex = 0;
+
+    async function setupAudio() {
+      await Tone.start();
+
+      mainFilter = new Tone.Filter(2200, "lowpass").toDestination();
+
+      // Mixer Channels
+      drumChannel = new Tone.Volume(0).connect(mainFilter);
+      synthChannel = new Tone.Volume(0).connect(mainFilter);
+      melodyChannel = new Tone.Volume(0).connect(mainFilter);
+      vinylChannel = new Tone.Volume(-20).toDestination();
+
+      // 1. Chords Engine
+      const synthLimiter = new Tone.Limiter(-3).connect(synthChannel);
+
+	  synth = new Tone.PolySynth(Tone.Synth, {
+	    oscillator: { type: "triangle" },
+	    envelope: { 
+	    	attack: 0.2,
+	    	decay: 0.8,
+	    	sustain: 0.7,
+	    	release: 0.5 
+	    	}
+	  }).connect(synthLimiter);
+	  
+	  synth.volume.value = -14;
+
+      // 2. Polyphonic Melody
+      // Multiple voices prevent a new note from cutting off a previous note.
+      melodySynth = new Tone.PolySynth(Tone.Synth, {
+        maxPolyphony: 4,
+        oscillator: { type: "sine" },
+        envelope: { attack: 0.08, decay: 0.25, sustain: 0.55, release: 0.45 }
+      }).connect(melodyChannel);
+      melodySynth.volume.value = -8;
+
+      // 3. Drums Engine
+      kick = new Tone.MembraneSynth({
+        pitchDecay: 0.05,
+        octaves: 6,
+        envelope: { attack: 0.001, decay: 0.4, sustain: 0.01, release: 0.4 }
+      }).connect(drumChannel);
+
+      snare = new Tone.NoiseSynth({
+        noise: { type: "pink" },
+        envelope: { attack: 0.001, decay: 0.2, sustain: 0 }
+      }).connect(drumChannel);
+      snare.volume.value = -8;
+
+      // Simple noise hi-hat; avoids the metallic/digital character of MetalSynth.
+      hihat = new Tone.NoiseSynth({
+        noise: { type: "white" },
+        envelope: { attack: 0.001, decay: 0.045, sustain: 0 }
+      }).connect(drumChannel);
+      hihat.volume.value = -22;
+
+      // 4. Vinyl Engine
+      vinylFilter = new Tone.Filter(1400, "bandpass").connect(vinylChannel);
+      vinylNoise = new Tone.Noise("pink").connect(vinylFilter);
+
+      // Loops Setup
+      chordIndex = 0;
+
+      // One musical loop keeps chords, melody, and drums locked to the
+      // same four-beat measure. This avoids the melody drifting away from
+      // the chord progression over time.
+      chordLoop = new Tone.Loop((time) => {
+        const chord = currentProgression[chordIndex % currentProgression.length];
+        synth.triggerAttackRelease(chord, "1m", time);
+        chordIndex++;
+      }, "1m");
+
+      melodyLoop = new Tone.Loop((time) => {
+        const activeChord =
+          currentProgression[(chordIndex - 1 + currentProgression.length) %
+          currentProgression.length];
+
+        // Generate a simple, sparse lo-fi melody from the current chord.
+        if (Math.random() > 0.3) {
+          const note = activeChord[Math.floor(Math.random() * activeChord.length)];
+          const leadNote = Tone.Frequency(note).transpose(12).toNote();
+          melodySynth.triggerAttackRelease(leadNote, "16n", time);
+        }
+      }, "8n");
+
+      drumLoop = new Tone.Loop((time) => {
+        // Straightforward boom-bap: kick on 1, optional extra kick,
+        // snare on 2 and 4, and offbeat hi-hats.
+        kick.triggerAttackRelease("C1", "8n", time);
+
+        if (Math.random() > 0.6) {
+          kick.triggerAttackRelease(
+            "C1",
+            "8n",
+            time + Tone.Time("4n").toSeconds() + Tone.Time("8n").toSeconds()
+          );
+        }
+
+        snare.triggerAttackRelease("8n", time + Tone.Time("4n").toSeconds());
+        snare.triggerAttackRelease(
+          "8n",
+          time + Tone.Time("2n").toSeconds() + Tone.Time("4n").toSeconds()
+        );
+
+        for (let i = 0; i < 4; i++) {
+          const hatTime =
+            time +
+            i * Tone.Time("4n").toSeconds() +
+            Tone.Time("8n").toSeconds() +
+            0.03;
+          hihat.triggerAttackRelease("16n", hatTime);
+        }
+      }, "1m");
+
+      crackleLoop = new Tone.Loop((time) => {
+        if (isVinylOn && Math.random() > 0.35) {
+          vinylFilter.frequency.setValueAtTime(
+            Math.random() * 1200 + 600,
+            time
+          );
+        }
+      }, "16n");
+
+      Tone.Transport.bpm.value = parseInt(document.getElementById("bpmSlider").value);
+      updateMixer();
+    }
+
+    function updateMixer() {
+      if (!drumChannel) return;
+      drumChannel.volume.rampTo(parseFloat(document.getElementById("drumsVol").value), 0.05);
+      synthChannel.volume.rampTo(parseFloat(document.getElementById("synthVol").value), 0.05);
+      melodyChannel.volume.rampTo(parseFloat(document.getElementById("melodyVol").value), 0.05);
+      
+      const vinylVolVal = parseFloat(document.getElementById("vinylVol").value);
+      if (vinylVolVal <= -58) {
+        vinylChannel.mute = true;
+      } else {
+        vinylChannel.mute = !isVinylOn;
+        vinylChannel.volume.rampTo(vinylVolVal, 0.05);
+      }
+    }
+
+    function updateMode(mode) {
+      if (!mainFilter) return;
+      if (mode === "study") {
+        mainFilter.frequency.rampTo(2500, 0.3);
+      } else if (mode === "calm") {
+        mainFilter.frequency.rampTo(1200, 0.3);
+      } else if (mode === "sleep") {
+        mainFilter.frequency.rampTo(450, 0.3);
+      }
+    }
+
+    // Play/Pause Main Beat
+    document.getElementById("playBtn").addEventListener("click", async () => {
+      if (!isPlaying) {
+        if (!mainFilter) await setupAudio();
+        
+        Tone.Transport.start();
+        chordLoop.start(0);
+        melodyLoop.start(0);
+        drumLoop.start(0);
+        crackleLoop.start(0);
+
+        if (isVinylOn) {
+          vinylNoise.start();
+          vinylChannel.mute = false;
+        }
+
+        updateMode(document.getElementById("modeSelect").value);
+
+        document.getElementById("playBtn").innerText = "Stop Beat";
+        document.getElementById("playBtn").style.backgroundColor = "#e76f51";
+        isPlaying = true;
+      } else {
+        Tone.Transport.stop();
+        if (vinylNoise) vinylNoise.stop();
+
+        document.getElementById("playBtn").innerText = "Start Beat";
+        document.getElementById("playBtn").style.backgroundColor = "var(--accent)";
+        isPlaying = false;
+      }
+    });
+
+    // Dedicated Vinyl Crackle Toggle
+    document.getElementById("vinylBtn").addEventListener("click", () => {
+      isVinylOn = !isVinylOn;
+      const btn = document.getElementById("vinylBtn");
+
+      if (isVinylOn) {
+        btn.innerText = "Vinyl: ON";
+        btn.style.borderColor = "var(--accent)";
+        vinylChannel.mute = false;
+        if (isPlaying && vinylNoise) vinylNoise.start();
+      } else {
+        btn.innerText = "Vinyl: OFF";
+        btn.style.borderColor = "var(--border)";
+        vinylChannel.mute = true;
+        if (vinylNoise) vinylNoise.stop();
+      }
+    });
+
+    // Real-time Slider & Select Handlers
+    document.getElementById("bpmSlider").addEventListener("input", (e) => {
+      document.getElementById("bpmVal").innerText = e.target.value;
+      if (Tone.Transport) {
+        Tone.Transport.bpm.rampTo(parseInt(e.target.value), 0.05);
+      }
+    });
+
+    document.getElementById("progSelect").addEventListener("change", (e) => {
+      currentProgression = progressions[e.target.value];
+      chordIndex = 0;
+    });
+
+    ["drumsVol", "synthVol", "melodyVol", "vinylVol"].forEach(id => {
+      document.getElementById(id).addEventListener("input", (e) => {
+        document.getElementById(id.replace("Vol", "Val")).innerText = e.target.value + " dB";
+        updateMixer();
+      });
+    });
+
+    document.getElementById("modeSelect").addEventListener("change", (e) => {
+      updateMode(e.target.value);
+    });
+
+    // PWA: register service worker for offline support / installability
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker
+          .register("service-worker.js")
+          .catch((err) => console.warn("Service worker registration failed:", err));
+      });
+    }
+  </script>
+</body>
+</html>
