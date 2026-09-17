@@ -4,11 +4,8 @@ const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png",
-  "./icons/icon-512-maskable.png",
-  "./icons/apple-touch-icon.png",
-  "./icons/favicon-32.png",
+  "./app-icons/app-icon-192.png",
+  "./app-icons/app-icon-512.png",
   "https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"
 ];
 
