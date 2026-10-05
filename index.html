@@ -538,6 +538,33 @@
     $("melodyShape").addEventListener("change", (e) => { melodyShape = e.target.value; });
     $("modeSelect").addEventListener("change", (e) => { mode = MODES[e.target.value]; applyMixer(); });
 
+    // Remember control positions between visits
+    const SAVED_IDS = ["modeSelect", "progSelect", "bpmSlider", "masterVol", "drumsVol",
+                       "padVol", "padShape", "melodyVol", "melodyShape"];
+    function saveSettings() {
+      try {
+        const o = {};
+        SAVED_IDS.forEach((id) => { o[id] = $(id).value; });
+        localStorage.setItem("chillforge-settings", JSON.stringify(o));
+      } catch (e) {}
+    }
+    function loadSettings() {
+      try {
+        const o = JSON.parse(localStorage.getItem("chillforge-settings") || "null");
+        if (!o) return;
+        SAVED_IDS.forEach((id) => {
+          const el = $(id);
+          if (o[id] === undefined) return;
+          el.value = o[id];
+          if (el.value !== String(o[id])) return;   // option no longer exists
+          el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input"));
+        });
+      } catch (e) {}
+    }
+    loadSettings();
+    document.addEventListener("input", saveSettings);
+    document.addEventListener("change", saveSettings);
+
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden && playing && ctx.state !== "running") ctx.resume().catch(() => {});
     });
