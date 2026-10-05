@@ -1,12 +1,11 @@
-const CACHE_NAME = "chillforge-cache-v1";
+const CACHE_NAME = "chillforge-cache-v2";
 
 const APP_SHELL = [
   "./",
   "./index.html",
   "./manifest.json",
   "./app-icons/app-icon-192.png",
-  "./app-icons/app-icon-512.png",
-  "./Tone.js"
+  "./app-icons/app-icon-512.png"
 ];
 
 // Install: Cache all assets cleanly
