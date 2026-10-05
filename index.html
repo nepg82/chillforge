@@ -130,6 +130,11 @@
     <div class="section-title">Channel Mixer</div>
 
     <div class="control-group">
+      <label for="masterVol">Master Volume <span id="masterVal">-6 dB</span></label>
+      <input type="range" id="masterVol" min="-40" max="0" value="-6">
+    </div>
+
+    <div class="control-group">
       <label for="drumsVol">Drums Volume <span id="drumsVal">0 dB</span></label>
       <input type="range" id="drumsVol" min="-40" max="6" value="0">
     </div>
@@ -179,6 +184,42 @@
           ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
           ["A3", "C#4", "E4", "G4"]        // A7
         ]
+      },
+      rising: {
+        label: "Imaj9 - IImaj7 - iii7 - IVmaj7 (Rising Climb)",
+        chords: [
+          ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
+          ["D3", "F#3", "A3", "C#4", "E4"],// Dmaj9 (Lydian lift)
+          ["E3", "G3", "B3", "D4"],        // Em7
+          ["F3", "A3", "C4", "E4"]         // Fmaj7
+        ]
+      },
+      descending: {
+        label: "IVmaj9 - iii7 - ii9 - Imaj9 (Descending Exhale)",
+        chords: [
+          ["F3", "A3", "C4", "E4", "G4"],  // Fmaj9
+          ["E3", "G3", "B3", "D4"],        // Em7
+          ["D3", "F3", "A3", "C4", "E4"],  // Dm9
+          ["C3", "E3", "G3", "B3", "D4"]   // Cmaj9
+        ]
+      },
+      turnaround: {
+        label: "Imaj9 - vi9 - ii9 - V13 (Sunny Turnaround)",
+        chords: [
+          ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
+          ["A2", "C3", "E3", "G3", "B3"],  // Am9
+          ["D3", "F3", "A3", "C4", "E4"],  // Dm9
+          ["F3", "G3", "B3", "E4"]         // G13
+        ]
+      },
+      sway: {
+        label: "Imaj9 - IVmaj9 (Two-Chord Sway)",
+        chords: [
+          ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
+          ["E3", "G3", "B3", "D4", "G4"],  // Cmaj9 (open voicing)
+          ["F3", "A3", "C4", "E4", "G4"],  // Fmaj9
+          ["A3", "C4", "E4", "G4"]         // Fmaj9 (upper voicing)
+        ]
       }
     };
 
@@ -206,7 +247,7 @@
     let progKey = Object.keys(PROGRESSIONS)[0];
     let mode = MODES.study;
     let padShape = "triangle", melodyShape = "sine";
-    const vol = { drums: 0, pad: 0, melody: 0 };
+    const vol = { master: -6, drums: 0, pad: 0, melody: 0 };
 
     const $ = (id) => document.getElementById(id);
 
@@ -258,7 +299,7 @@
     function buildGraph() {
       const n = {};
       n.out = ctx.createGain();
-      n.out.gain.value = 0.9;
+      n.out.gain.value = dbToGain(vol.master);
       n.comp = ctx.createDynamicsCompressor();   // safety limiter
       n.comp.threshold.value = -10;
       n.comp.ratio.value = 6;
@@ -310,6 +351,7 @@
     function applyMixer(instant) {
       if (!g) return;
       const t = ctx.currentTime, tc = instant ? 0.001 : 0.03;
+      g.out.gain.setTargetAtTime(dbToGain(vol.master), t, tc);
       g.drums.gain.setTargetAtTime(dbToGain(vol.drums) * mode.drums, t, tc);
       g.pad.gain.setTargetAtTime(dbToGain(vol.pad), t, tc);
       g.melody.gain.setTargetAtTime(dbToGain(vol.melody), t, tc);
@@ -385,7 +427,7 @@
       o.frequency.setValueAtTime(140, t);
       o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
       gn.gain.setValueAtTime(0.0001, t);
-      gn.gain.exponentialRampToValueAtTime(0.9 * vel, t + 0.004);
+      gn.gain.exponentialRampToValueAtTime(0.55 * vel, t + 0.004);
       gn.gain.exponentialRampToValueAtTime(0.001, t + 0.42);
       o.connect(gn).connect(g.drums);
       o.start(t);
@@ -484,7 +526,7 @@
       if (g) g.delay.delayTime.setTargetAtTime(45 / bpm, ctx.currentTime, 0.05);
     });
 
-    ["drums", "pad", "melody"].forEach((ch) => {
+    ["master", "drums", "pad", "melody"].forEach((ch) => {
       $(ch + "Vol").addEventListener("input", (e) => {
         vol[ch] = parseFloat(e.target.value);
         $(ch + "Val").textContent = vol[ch] <= -40 ? "Off" : vol[ch] + " dB";
