@@ -148,6 +148,7 @@
       <label for="padShape">Chords / Pad Shape</label>
       <select id="padShape">
         <option value="triangle" selected>Triangle (Warm/Soft)</option>
+        <option value="softtri">Soft Triangle (Rounded/Mellow)</option>
         <option value="sine">Sine (Pure/Mellow)</option>
         <option value="sawtooth">Sawtooth (Bright/Buzzy)</option>
         <option value="square">Square (Hollow/Retro)</option>
@@ -163,6 +164,7 @@
       <label for="melodyShape">Melody Shape</label>
       <select id="melodyShape">
         <option value="sine" selected>Sine (Pure/Mellow)</option>
+        <option value="softtri">Soft Triangle (Rounded/Mellow)</option>
         <option value="triangle">Triangle (Warm/Soft)</option>
         <option value="sawtooth">Sawtooth (Bright/Buzzy)</option>
         <option value="square">Square (Hollow/Retro)</option>
@@ -231,7 +233,7 @@
     };
 
     // Waveform loudness compensation so shapes sit at similar levels.
-    const SHAPE_LEVEL = { sine: 1.2, triangle: 1, sawtooth: 0.4, square: 0.35 };
+    const SHAPE_LEVEL = { sine: 1.2, softtri: 1.1, triangle: 1, sawtooth: 0.4, square: 0.35 };
 
     const SWING = 0.16;        // delay on off-16ths, as a fraction of a step
     const LOOKAHEAD = 0.2;     // seconds scheduled ahead of the audio clock
@@ -259,6 +261,23 @@
       const m = /^([A-G])([#b]?)(-?\d)$/.exec(name);
       const midi = (parseInt(m[3], 10) + 1) * 12 + SEMI[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0);
       return 440 * Math.pow(2, (midi - 69) / 12);
+    }
+    // Custom waveform: sine plus triangle overtones at OVERTONE_MIX of full
+    // strength (0 = sine, 1 = triangle). Built once, then reused.
+    const OVERTONE_MIX = 0.5;
+    const waveCache = {};
+    function applyShape(osc, shape) {
+      if (shape !== "softtri") { osc.type = shape; return; }
+      if (!waveCache[shape]) {
+        const N = 12, real = new Float32Array(N), imag = new Float32Array(N);
+        imag[1] = 1;
+        for (let h = 3; h < N; h += 2) {
+          const sign = (((h - 1) / 2) % 2) ? -1 : 1;
+          imag[h] = OVERTONE_MIX * sign / (h * h);
+        }
+        waveCache[shape] = ctx.createPeriodicWave(real, imag);
+      }
+      osc.setPeriodicWave(waveCache[shape]);
     }
     const dbToGain = (db) => (db <= -40 ? 0 : Math.pow(10, db / 20));
     const rand = (a, b) => a + Math.random() * (b - a);
@@ -373,7 +392,7 @@
         const ts = t + i * 0.012;                    // slight strum
         const o = ctx.createOscillator();
         const gn = ctx.createGain();
-        o.type = padShape;
+        applyShape(o, padShape);
         o.frequency.value = noteFreq(note);
         o.detune.value = rand(-6, 6);
         gn.gain.setValueAtTime(0.0001, ts);
@@ -398,7 +417,7 @@
 
       const o = ctx.createOscillator();
       const gn = ctx.createGain();
-      o.type = melodyShape;
+      applyShape(o, melodyShape);
       o.frequency.value = noteFreq(note) * 2;
       gn.gain.setValueAtTime(0.0001, t);
       gn.gain.linearRampToValueAtTime(peak, t + 0.03);
