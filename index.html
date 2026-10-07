@@ -518,26 +518,35 @@
     $("progGroup").hidden = Object.keys(PROGRESSIONS).length < 2;
     progSelect.addEventListener("change", (e) => { progKey = e.target.value; chordIdx = 0; });
 
-    $("playBtn").addEventListener("click", () => {
-      const btn = $("playBtn");
-      if (!playing) {
-        if (!ctx) initContext();
-        ctx.resume();
-        buildGraph();
-        step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
-        nextTime = ctx.currentTime + 0.1;
-        playing = true;
-        timer.start();
-        btn.textContent = "Stop Beat";
-        btn.classList.add("playing");
-      } else {
-        playing = false;
-        timer.stop();
-        teardownGraph();
-        btn.textContent = "Start Beat";
-        btn.classList.remove("playing");
-      }
-    });
+	$("playBtn").addEventListener("click", () => {
+	  const btn = $("playBtn");
+	  if (!playing) {
+	    if (!ctx) initContext();
+	    ctx.resume();
+	    buildGraph();
+	    step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
+	    nextTime = ctx.currentTime + 0.1;
+	    playing = true;
+	    timer.start();
+	    
+	    // Enable Media Session and Silent Audio Track
+	    setupMediaSession();
+	    startSilentAudio();
+	
+	    btn.textContent = "Stop Beat";
+	    btn.classList.add("playing");
+	  } else {
+	    playing = false;
+	    timer.stop();
+	    teardownGraph();
+	
+	    // Stop Media Session and Silent Audio Track
+	    stopSilentAudio();
+	
+	    btn.textContent = "Start Beat";
+	    btn.classList.remove("playing");
+	  }
+	});
 
     $("bpmSlider").addEventListener("input", (e) => {
       bpm = parseInt(e.target.value, 10);
@@ -595,6 +604,59 @@
           .catch((err) => console.warn("Service worker registration failed:", err));
       });
     }
+    // ---------------------------------------------------------------
+	// Media Session API & Silent Audio (Bluetooth Controls)
+	// ---------------------------------------------------------------
+	let silentAudio = null;
+	
+	function setupMediaSession() {
+	  if (!("mediaSession" in navigator)) return;
+	
+	  // Set metadata displayed on Bluetooth devices / lock screen
+	  navigator.mediaSession.metadata = new MediaMetadata({
+	    title: "Chillforge Beat Generator",
+	    artist: "Chillforge",
+	    album: "Generative Beats"
+	  });
+	
+	  // Handle Play input
+	  navigator.mediaSession.setActionHandler("play", () => {
+	    if (!playing) $("playBtn").click();
+	  });
+	
+	  // Handle Pause input
+	  navigator.mediaSession.setActionHandler("pause", () => {
+	    if (playing) $("playBtn").click();
+	  });
+	
+	  // Handle Play/Pause toggle button on Bluetooth headsets
+	  navigator.mediaSession.setActionHandler("stop", () => {
+	    if (playing) $("playBtn").click();
+	  });
+	}
+	
+	// Silent audio buffer keeps OS audio focus active on mobile devices
+	function startSilentAudio() {
+	  if (!silentAudio) {
+	    silentAudio = new Audio(
+	      "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA="
+	    );
+	    silentAudio.loop = true;
+	  }
+	  silentAudio.play().catch(() => {});
+	  if ("mediaSession" in navigator) {
+	    navigator.mediaSession.playbackState = "playing";
+	  }
+	}
+
+	function stopSilentAudio() {
+	  if (silentAudio) {
+	    silentAudio.pause();
+	  }
+	  if ("mediaSession" in navigator) {
+	    navigator.mediaSession.playbackState = "none";
+	  }
+	}
   </script>
 </body>
 </html>
