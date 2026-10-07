@@ -249,7 +249,6 @@
     let progKey = Object.keys(PROGRESSIONS)[0];
     let mode = MODES.study;
     let padShape = "triangle", melodyShape = "sine";
-    let mediaDest = null, audioEl = null;
     const vol = { master: -6, drums: 0, pad: 0, melody: 0 };
 
     const $ = (id) => document.getElementById(id);
@@ -314,26 +313,6 @@
       ctx.onstatechange = () => {
         if (playing && ctx.state !== "running") ctx.resume().catch(() => {});
       };
-      
-      mediaDest = ctx.createMediaStreamDestination();
-	  audioEl = new Audio();
-	  audioEl.srcObject = mediaDest.stream;
-	  // If Android pauses us (phone call, another app grabs focus), stop cleanly.
-	  audioEl.addEventListener("pause", () => { if (playing) stopBeat(); });
-
-	  if ("mediaSession" in navigator) {
-	    navigator.mediaSession.metadata = new MediaMetadata({
-	      title: "Chillforge",
-	      artist: "Generative lo-fi beat",
-	      artwork: [
-	        { src: "app-icons/app-icon-192.png", sizes: "192x192", type: "image/png" },
-	        { src: "app-icons/app-icon-512.png", sizes: "512x512", type: "image/png" }
-	      ]
-	    });
-	    navigator.mediaSession.setActionHandler("play", startBeat);
-	    navigator.mediaSession.setActionHandler("pause", stopBeat);
-	    navigator.mediaSession.setActionHandler("stop", stopBeat);
-	  }
     }
 
     function buildGraph() {
@@ -346,7 +325,7 @@
       n.filter = ctx.createBiquadFilter();
       n.filter.type = "lowpass";
       n.filter.frequency.value = mode.cutoff;
-      n.filter.connect(n.comp).connect(n.out).connect(mediaDest);
+      n.filter.connect(n.comp).connect(n.out).connect(ctx.destination);
 
       n.drums = ctx.createGain();  n.drums.connect(n.filter);
       n.pad = ctx.createGain();    n.pad.connect(n.filter);
@@ -539,34 +518,26 @@
     $("progGroup").hidden = Object.keys(PROGRESSIONS).length < 2;
     progSelect.addEventListener("change", (e) => { progKey = e.target.value; chordIdx = 0; });
 
-	function startBeat() {
-	  if (playing) return;
-	  if (!ctx) initContext();
-	  ctx.resume();
-	  audioEl.play().catch(() => {});
-	  buildGraph();
-	  step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
-	  nextTime = ctx.currentTime + 0.1;
-	  playing = true;
-	  timer.start();
-	  $("playBtn").textContent = "Stop Beat";
-	  $("playBtn").classList.add("playing");
-	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
-	}
-
-	function stopBeat() {
-	  if (!playing) return;
-	  playing = false;
-	  timer.stop();
-	  teardownGraph();
-	  $("playBtn").textContent = "Start Beat";
-	  $("playBtn").classList.remove("playing");
-	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
-	  // Let the 400 ms fade-out in teardownGraph finish before pausing the element.
-	  setTimeout(() => { if (!playing && audioEl) audioEl.pause(); }, 450);
-	}
-
-	$("playBtn").addEventListener("click", () => (playing ? stopBeat() : startBeat()));
+    $("playBtn").addEventListener("click", () => {
+      const btn = $("playBtn");
+      if (!playing) {
+        if (!ctx) initContext();
+        ctx.resume();
+        buildGraph();
+        step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
+        nextTime = ctx.currentTime + 0.1;
+        playing = true;
+        timer.start();
+        btn.textContent = "Stop Beat";
+        btn.classList.add("playing");
+      } else {
+        playing = false;
+        timer.stop();
+        teardownGraph();
+        btn.textContent = "Start Beat";
+        btn.classList.remove("playing");
+      }
+    });
 
     $("bpmSlider").addEventListener("input", (e) => {
       bpm = parseInt(e.target.value, 10);
