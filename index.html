@@ -55,7 +55,7 @@
     }
     h2 {
       margin: 0;
-      font-size: 0.4rem;
+      font-size: 0.7rem;
       font-weight: 600;
       text-align: center;
       color: var(--accent);
@@ -112,7 +112,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261007-1659</h2>
+    <h2>261008-0954</h2>
 
     <button id="playBtn">Start Beat</button>
 
@@ -258,6 +258,7 @@
     let progKey = Object.keys(PROGRESSIONS)[0];
     let mode = MODES.study;
     let padShape = "triangle", melodyShape = "sine";
+    let silentEl = null;
     const vol = { master: -6, drums: 0, pad: 0, melody: 0 };
 
     const $ = (id) => document.getElementById(id);
@@ -271,6 +272,29 @@
       const midi = (parseInt(m[3], 10) + 1) * 12 + SEMI[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0);
       return 440 * Math.pow(2, (midi - 69) / 12);
     }
+    
+    // A real (non-empty) 1-second silent WAV, so looping can't spin the main thread.
+	function makeSilentUrl() {
+	  const rate = 8000, n = rate;                 // 1 second, 16-bit mono
+	  const buf = new ArrayBuffer(44 + n * 2);
+	  const v = new DataView(buf);
+	  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+	  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
+	  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+	  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+	  v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+	  w(36, "data"); v.setUint32(40, n * 2, true);
+	  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+	}
+
+	function ensureSilentEl() {
+	  if (silentEl) return;
+	  silentEl = new Audio(makeSilentUrl());
+	  silentEl.loop = true;
+	  // If the OS/headset pauses the element directly, stop the beat to match.
+	  silentEl.addEventListener("pause", () => { if (playing) stopBeat(); });
+	}
+    
     // Custom waveform: sine plus triangle overtones at OVERTONE_MIX of full
     // strength (0 = sine, 1 = triangle). Built once, then reused.
     const OVERTONE_MIX = 0.5;
@@ -527,26 +551,51 @@
     $("progGroup").hidden = Object.keys(PROGRESSIONS).length < 2;
     progSelect.addEventListener("change", (e) => { progKey = e.target.value; chordIdx = 0; });
 
-    $("playBtn").addEventListener("click", () => {
-      const btn = $("playBtn");
-      if (!playing) {
-        if (!ctx) initContext();
-        ctx.resume();
-        buildGraph();
-        step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
-        nextTime = ctx.currentTime + 0.1;
-        playing = true;
-        timer.start();
-        btn.textContent = "Stop Beat";
-        btn.classList.add("playing");
-      } else {
-        playing = false;
-        timer.stop();
-        teardownGraph();
-        btn.textContent = "Start Beat";
-        btn.classList.remove("playing");
-      }
-    });
+	function startBeat() {
+	  if (playing) return;
+	  if (!ctx) initContext();
+	  ensureSilentEl();
+	  ctx.resume();
+	  silentEl.play().catch(() => {});
+	  buildGraph();
+	  step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
+	  nextTime = ctx.currentTime + 0.1;
+	  playing = true;
+	  timer.start();
+	  $("playBtn").textContent = "Stop Beat";
+	  $("playBtn").classList.add("playing");
+	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+	}
+
+	function stopBeat() {
+	  if (!playing) return;
+	  playing = false;                 // set first so the element's pause listener is a no-op
+	  timer.stop();
+	  teardownGraph();
+	  if (silentEl) silentEl.pause();
+	  $("playBtn").textContent = "Start Beat";
+	  $("playBtn").classList.remove("playing");
+	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+	}
+
+	$("playBtn").addEventListener("click", () => (playing ? stopBeat() : startBeat()));
+
+	// Bluetooth / lock-screen controls
+	if ("mediaSession" in navigator) {
+	  try {
+	    navigator.mediaSession.metadata = new MediaMetadata({
+	      title: "Chillforge",
+	      artist: "Generative lo-fi beat",
+	      artwork: [
+	        { src: "app-icons/app-icon-192.png", sizes: "192x192", type: "image/png" },
+	        { src: "app-icons/app-icon-512.png", sizes: "512x512", type: "image/png" }
+	      ]
+	    });
+	    navigator.mediaSession.setActionHandler("play", startBeat);
+	    navigator.mediaSession.setActionHandler("pause", stopBeat);
+	    navigator.mediaSession.setActionHandler("stop", stopBeat);
+	  } catch (e) {}
+	}
 
     $("bpmSlider").addEventListener("input", (e) => {
       bpm = parseInt(e.target.value, 10);
