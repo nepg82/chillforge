@@ -582,6 +582,14 @@
 	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
 	}
 
+	// Beat is "playing" on paper but the audio died: rebuild without touching the silent element.
+	function restartBeat() {
+	  playing = false;
+	  timer.stop();
+	  teardownGraph();
+	  startBeat();
+	}
+
 	$("playBtn").addEventListener("click", () => (playing ? stopBeat() : startBeat()));
 
 	// Bluetooth / lock-screen controls
@@ -595,7 +603,7 @@
 	        { src: "app-icons/app-icon-512.png", sizes: "512x512", type: "image/png" }
 	      ]
 	    });
-	    navigator.mediaSession.setActionHandler("play", startBeat);
+	    navigator.mediaSession.setActionHandler("play", () => (playing ? restartBeat() : startBeat()));
 	    navigator.mediaSession.setActionHandler("pause", stopBeat);
 	    navigator.mediaSession.setActionHandler("stop", stopBeat);
 	  } catch (e) {}
@@ -647,8 +655,10 @@
     document.addEventListener("change", saveSettings);
 
     document.addEventListener("visibilitychange", () => {
-      if (!document.hidden && playing && ctx.state !== "running") ctx.resume().catch(() => {});
-    });
+	  if (document.hidden || !playing) return;
+	  if (silentEl && silentEl.paused) { stopBeat(); return; }   // OS paused us: show the truth
+	  if (ctx.state !== "running") ctx.resume().catch(() => {});
+	});
 
     // PWA: offline support / installability
     if ("serviceWorker" in navigator) {
