@@ -154,7 +154,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261008-1509</h2>
+    <h2>261008-1515</h2>
 
     <button id="playBtn">Start Beat</button>
 
@@ -237,6 +237,45 @@
     // Styles: everything that differs between genres lives here.
     // The tempo row, mixer rows and shape selectors are generated from it.
     // ---------------------------------------------------------------
+    Object.assign(PROGRESSIONS, {
+      neon: {
+        label: "i - VI - III - VII (Neon Drive)",
+        chords: [
+          ["A2", "E3", "A3", "C4"],        // Am
+          ["F2", "C3", "F3", "A3"],        // F
+          ["C3", "G3", "C4", "E4"],        // C
+          ["G2", "D3", "G3", "B3"]         // G
+        ]
+      },
+      andalusian: {
+        label: "i - VII - VI - V (Andalusian Night)",
+        chords: [
+          ["A2", "E3", "A3", "C4"],        // Am
+          ["G2", "D3", "G3", "B3"],        // G
+          ["F2", "C3", "F3", "A3"],        // F
+          ["E2", "B2", "E3", "G#3"]        // E
+        ]
+      },
+      sunset: {
+        label: "i - VI - III - VII (Sunset Strip)",
+        chords: [
+          ["D3", "A3", "D4", "F4"],        // Dm
+          ["Bb2", "F3", "Bb3", "D4"],      // Bb
+          ["F2", "C3", "F3", "A3"],        // F
+          ["C3", "G3", "C4", "E4"]         // C
+        ]
+      },
+      midnight: {
+        label: "i - VI - III - VII (Midnight Run)",
+        chords: [
+          ["E2", "B2", "E3", "G3"],        // Em
+          ["C3", "G3", "C4", "E4"],        // C
+          ["G2", "D3", "G3", "B3"],        // G
+          ["D3", "A3", "D4", "F#4"]        // D
+        ]
+      }
+    });
+
     const SHAPE_LABELS = {
       triangle: "Triangle (Warm/Soft)",
       softtri:  "Soft Triangle (Rounded/Mellow)",
@@ -254,7 +293,9 @@
         label: "Chillwave",
         bpm: { min: 55, max: 95, def: 83 },
         swing: 0.16,                        // delay on off-16ths, fraction of a step
-        progs: Object.keys(PROGRESSIONS),
+        progs: ["jazz251", "rising", "descending", "turnaround", "sway"],
+        lead: "melody", drums: "chill", jitter: 0.005,
+        cutoffMul: 1, padCutoff: 1800, reverb: 0, echo: 0.3,
         channels: [                         // mixer rows (Master is always added first)
           { id: "drums",  label: "Drums",  max: 6, def: 0 },
           { id: "pad",    label: "Pad",    max: 6, def: 0 },
@@ -269,6 +310,29 @@
       }
     };
 
+    STYLES.synthwave = {
+      label: "Synthwave",
+      bpm: { min: 85, max: 125, def: 108 },
+      swing: 0,
+      progs: ["neon", "andalusian", "sunset", "midnight"],
+      lead: "arp", drums: "synth", jitter: 0.002,
+      cutoffMul: 1.8, padCutoff: 2600, reverb: 0.35, echo: 0.25,
+      channels: [
+        { id: "drums", label: "Drums", max: 6, def: 0 },
+        { id: "bass",  label: "Bass",  max: 6, def: -2 },
+        { id: "pad",   label: "Pad",   max: 6, def: -3 },
+        { id: "arp",   label: "Arp",   max: 6, def: -2 }
+      ],
+      selects: [
+        { id: "padShape", label: "Pad", def: "super",
+          options: [["super", "Supersaw (Wide/Lush)"], ["sawtooth", SHAPE_LABELS.sawtooth], ["softtri", SHAPE_LABELS.softtri]] },
+        { id: "arpPattern", label: "Pattern", def: "up",
+          options: [["up", "Up"], ["updown", "Up-Down"], ["down", "Down"], ["random", "Random"]] },
+        { id: "arpShape", label: "Lead", def: "sawtooth",
+          options: shapeOpts(["sawtooth", "square", "softtri", "triangle", "sine"]) }
+      ]
+    };
+
     // Intensity: master filter cutoff, drum level, melody density. Applies to every style.
     const INTENSITY = {
       study: { cutoff: 2500, drums: 1,    melody: 0.55 },
@@ -277,7 +341,11 @@
     };
 
     // Waveform loudness compensation so shapes sit at similar levels.
-    const SHAPE_LEVEL = { sine: 1.2, softtri: 1.1, triangle: 1, sawtooth: 0.4, square: 0.35 };
+    Object.assign(INTENSITY.study, { arpEvery: 1, pulse: true });   // arp note spacing (steps), pulsing bass
+    Object.assign(INTENSITY.calm,  { arpEvery: 2, pulse: true });
+    Object.assign(INTENSITY.sleep, { arpEvery: 4, pulse: false });
+
+    const SHAPE_LEVEL = { sine: 1.2, softtri: 1.1, triangle: 1, sawtooth: 0.4, square: 0.35, super: 0.2 };
 
     const LOOKAHEAD = 0.2;     // seconds scheduled ahead of the audio clock
     const TICK_MS = 25;        // scheduler wake-up interval
@@ -289,6 +357,7 @@
     let playing = false;
     let step = 0, nextTime = 0, chordIdx = 0;
     let currentChord = null, lastMelodyNote = null;
+    let arpK = 0, irBuf = null;
 
     // Per-style settings (tempo, levels, pulldowns, progression), remembered separately.
     let styleKey = Object.keys(STYLES)[0];
@@ -327,6 +396,15 @@
         waveCache[shape] = ctx.createPeriodicWave(real, imag);
       }
       osc.setPeriodicWave(waveCache[shape]);
+    }
+    // Synthetic reverb impulse: stereo noise with an exponential-ish decay.
+    function makeIR(sec, decay) {
+      const len = Math.floor(ctx.sampleRate * sec), b = ctx.createBuffer(2, len, ctx.sampleRate);
+      for (let c = 0; c < 2; c++) {
+        const d = b.getChannelData(c);
+        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+      }
+      return b;
     }
     const dbToGain = (db) => (db <= VOL_MIN ? 0 : Math.pow(10, db / 20));
     const rand = (a, b) => a + Math.random() * (b - a);
@@ -390,22 +468,30 @@
       const n = {};
       n.out = ctx.createGain();
       n.out.gain.value = dbToGain(S.vol.master);
+      const st = STYLES[styleKey];
       n.comp = ctx.createDynamicsCompressor();   // safety limiter
       n.comp.threshold.value = -10;
       n.comp.ratio.value = 6;
       n.filter = ctx.createBiquadFilter();
       n.filter.type = "lowpass";
-      n.filter.frequency.value = inten.cutoff;
+      n.filter.frequency.value = inten.cutoff * st.cutoffMul;
       n.filter.connect(n.comp).connect(n.out).connect(ctx.destination);
 
       n.drums = ctx.createGain();  n.drums.connect(n.filter);
       n.pad = ctx.createGain();    n.pad.connect(n.filter);
       n.melody = ctx.createGain(); n.melody.connect(n.filter);
+      if (st.lead === "arp") {
+        n.bass = ctx.createGain(); n.bass.connect(n.filter);
+        n.arp = ctx.createGain();  n.arp.connect(n.filter);
+        n.bassFilter = ctx.createBiquadFilter();
+        n.bassFilter.type = "lowpass"; n.bassFilter.frequency.value = 650; n.bassFilter.Q.value = 3;
+        n.bassFilter.connect(n.bass);
+      }
 
       // Pad tone shaping
       n.padFilter = ctx.createBiquadFilter();
       n.padFilter.type = "lowpass";
-      n.padFilter.frequency.value = 1800;
+      n.padFilter.frequency.value = st.padCutoff;
       n.padFilter.connect(n.pad);
 
       // Shared drum filters
@@ -419,13 +505,22 @@
       // Melody echo (dotted eighth)
       n.delay = ctx.createDelay(2);
       n.delay.delayTime.value = 45 / S.bpm;
-      const send = ctx.createGain(); send.gain.value = 0.3;
+      const send = ctx.createGain(); send.gain.value = st.echo;
       const fb = ctx.createGain();   fb.gain.value = 0.38;
       const dLP = ctx.createBiquadFilter();
       dLP.type = "lowpass"; dLP.frequency.value = 1800;
-      n.melody.connect(send).connect(n.delay).connect(dLP);
+      n[st.lead].connect(send).connect(n.delay).connect(dLP);
       dLP.connect(fb).connect(n.delay);
       dLP.connect(n.filter);
+
+      if (st.reverb > 0) {
+        if (!irBuf) irBuf = makeIR(2.2, 3);
+        n.conv = ctx.createConvolver(); n.conv.buffer = irBuf;
+        n.revSend = ctx.createGain(); n.revSend.gain.value = st.reverb;
+        n.revSend.connect(n.conv).connect(n.filter);
+        n.pad.connect(n.revSend); n.snareBP.connect(n.revSend);
+        if (n.arp) n.arp.connect(n.revSend);
+      }
 
       g = n;
       applyMixer(true);
@@ -448,7 +543,7 @@
         const scale = c.id === "drums" ? inten.drums : 1;
         node.gain.setTargetAtTime(dbToGain(S.vol[c.id]) * scale, t, tc);
       });
-      g.filter.frequency.setTargetAtTime(inten.cutoff, t, instant ? 0.001 : 0.15);
+      g.filter.frequency.setTargetAtTime(inten.cutoff * STYLES[styleKey].cutoffMul, t, instant ? 0.001 : 0.15);
     }
 
     // ---------------------------------------------------------------
@@ -459,24 +554,95 @@
       const chord = chords[chordIdx % chords.length];
       chordIdx++;
       currentChord = chord;
+      arpK = 0;
 
       const shape = S.sel.padShape;
       const dur = 16 * stepDur();
       const peak = (0.7 / chord.length) * SHAPE_LEVEL[shape];
       chord.forEach((note, i) => {
         const ts = t + i * 0.012;                    // slight strum
-        const o = ctx.createOscillator();
-        const gn = ctx.createGain();
-        applyShape(o, shape);
-        o.frequency.value = noteFreq(note);
-        o.detune.value = rand(-6, 6);
-        gn.gain.setValueAtTime(0.0001, ts);
-        gn.gain.linearRampToValueAtTime(peak, ts + 0.18);
-        gn.gain.setTargetAtTime(0, t + dur - 0.05, 0.25);
-        o.connect(gn).connect(g.padFilter);
-        o.start(ts);
-        o.stop(t + dur + 1.6);
+        const dets = shape === "super" ? [-14, 0, 14] : [rand(-6, 6)];
+        dets.forEach((dt) => {
+          const o = ctx.createOscillator();
+          const gn = ctx.createGain();
+          applyShape(o, shape === "super" ? "sawtooth" : shape);
+          o.frequency.value = noteFreq(note);
+          o.detune.value = shape === "super" ? dt + rand(-3, 3) : dt;
+          gn.gain.setValueAtTime(0.0001, ts);
+          gn.gain.linearRampToValueAtTime(peak, ts + 0.18);
+          gn.gain.setTargetAtTime(0, t + dur - 0.05, 0.25);
+          o.connect(gn).connect(g.padFilter);
+          o.start(ts);
+          o.stop(t + dur + 1.6);
+        });
       });
+    }
+
+    // Bass: sawtooth on the chord root, one octave below the pad's lowest note.
+    function playBass(t, s) {
+      const sd = stepDur();
+      let f = noteFreq(currentChord[0]) / 2;
+      let dur, peak, atk;
+      if (inten.pulse) {
+        dur = 2 * sd * 0.85;
+        if ((s / 2) % 4 === 3) f *= 2;                 // octave pop on the last 8th of each beat group
+        peak = s % 4 === 0 ? 0.34 : 0.26; atk = 0.008;
+      } else {
+        dur = 16 * sd; peak = 0.3; atk = 0.08;         // sleep: one long note per bar
+      }
+      const o = ctx.createOscillator();
+      const gn = ctx.createGain();
+      o.type = "sawtooth";
+      o.frequency.value = f;
+      gn.gain.setValueAtTime(0.0001, t);
+      gn.gain.linearRampToValueAtTime(peak, t + atk);
+      gn.gain.setTargetAtTime(peak * 0.55, t + atk, 0.08);
+      gn.gain.setTargetAtTime(0, t + dur, 0.04);
+      o.connect(gn).connect(g.bassFilter);
+      o.start(t);
+      o.stop(t + dur + 0.3);
+    }
+
+    // Arp: walks through the chord's notes (two octaves up from the pad voicing).
+    const poolCache = new WeakMap();
+    function arpPool(chord) {
+      let p = poolCache.get(chord);
+      if (!p) {
+        const fs = new Set();
+        chord.forEach((n, i) => {
+          const f = noteFreq(n);
+          fs.add(+(f * 2).toFixed(2));
+          if (i < 3) fs.add(+(f * 4).toFixed(2));
+        });
+        p = [...fs].sort((a, b) => a - b);
+        poolCache.set(chord, p);
+      }
+      return p;
+    }
+    function arpIndex(pat, n, k) {
+      if (pat === "random") return Math.floor(Math.random() * n);
+      if (pat === "down") return n - 1 - (k % n);
+      if (pat === "updown") { const p = 2 * n - 2, m = k % p; return m < n ? m : p - m; }
+      return k % n;
+    }
+    function playArp(t, s) {
+      if (!currentChord) return;
+      const pool = arpPool(currentChord);
+      const f = pool[arpIndex(S.sel.arpPattern, pool.length, arpK++)];
+      const shape = S.sel.arpShape;
+      const dur = inten.arpEvery * stepDur() * 0.8;
+      const peak = 0.13 * SHAPE_LEVEL[shape] * (s % 4 === 0 ? 1 : 0.75);
+      const o = ctx.createOscillator();
+      const gn = ctx.createGain();
+      applyShape(o, shape);
+      o.frequency.value = f;
+      gn.gain.setValueAtTime(0.0001, t);
+      gn.gain.linearRampToValueAtTime(peak, t + 0.004);
+      gn.gain.setTargetAtTime(peak * 0.35, t + 0.004, 0.07);
+      gn.gain.setTargetAtTime(0, t + dur, 0.03);
+      o.connect(gn).connect(g.arp);
+      o.start(t);
+      o.stop(t + dur + 0.25);
     }
 
     function playMelody(t) {
@@ -549,25 +715,44 @@
     // ---------------------------------------------------------------
     // Scheduler (16 steps per bar, 4/4)
     // ---------------------------------------------------------------
+    function drumsChill(s, jt) {
+      if (s === 0) kick(jt, 1);
+      else if (s === 6 && Math.random() < 0.4) kick(jt, 0.8);
+      else if (s === 10 && Math.random() < 0.35) kick(jt, 0.75);
+
+      if (s === 4 || s === 12) snare(jt, rand(0.85, 1));
+
+      if (s % 2 === 0) hat(jt, s % 4 === 2 ? rand(0.9, 1) : rand(0.4, 0.6));
+      else if (Math.random() < 0.15) hat(jt, 0.3);
+    }
+
+    // Straight 80s pattern: kick on 1 and 3, big snare on 2 and 4, open hats on the offbeats.
+    function drumsSynth(s, jt) {
+      if (s === 0 || s === 8) kick(jt, 1);
+      else if ((s === 10 || s === 14) && Math.random() < 0.3) kick(jt, 0.7);
+
+      if (s === 4 || s === 12) snare(jt, rand(0.9, 1));
+
+      if (s % 4 === 2) noiseHit(jt, g.hatHP, 0.14, 0.11);        // open hat
+      else if (s % 4 === 0) hat(jt, 0.5);
+      else if (Math.random() < 0.6) hat(jt, rand(0.15, 0.25));
+    }
+    const DRUMS = { chill: drumsChill, synth: drumsSynth };
+
     function scheduleStep(s, t) {
-      const sd = stepDur();
-      if (s % 2 === 1) t += sd * STYLES[styleKey].swing;   // swing the off-16ths
+      const st = STYLES[styleKey];
+      if (s % 2 === 1) t += stepDur() * st.swing;          // swing the off-16ths
 
       if (s === 0) playChord(t);
 
-      if (inten.drums > 0) {
-        const jt = t + rand(-0.005, 0.005);      // human timing
-        if (s === 0) kick(jt, 1);
-        else if (s === 6 && Math.random() < 0.4) kick(jt, 0.8);
-        else if (s === 10 && Math.random() < 0.35) kick(jt, 0.75);
+      if (inten.drums > 0) DRUMS[st.drums](s, t + rand(-st.jitter, st.jitter));
 
-        if (s === 4 || s === 12) snare(jt, rand(0.85, 1));
-
-        if (s % 2 === 0) hat(jt, s % 4 === 2 ? rand(0.9, 1) : rand(0.4, 0.6));
-        else if (Math.random() < 0.15) hat(jt, 0.3);
+      if (st.lead === "melody") {
+        if (s % 2 === 0 && Math.random() < inten.melody) playMelody(t);
+      } else {
+        if (inten.pulse ? s % 2 === 0 : s === 0) playBass(t, s);
+        if (s % inten.arpEvery === 0) playArp(t, s);
       }
-
-      if (s % 2 === 0 && Math.random() < inten.melody) playMelody(t);
     }
 
     function tick() {
@@ -747,12 +932,11 @@
     function switchStyle(key) {
       styleKey = key;
       S = store[key];
-      chordIdx = 0;
+      chordIdx = 0; currentChord = null; lastMelodyNote = null;
       buildControls();
       fillProgressions();
-      applyMixer();
-      if (g) g.delay.delayTime.setTargetAtTime(45 / S.bpm, ctx.currentTime, 0.05);
       saveSettings();
+      if (playing) restartBeat();      // each style has its own audio graph
     }
 
     // ---------------------------------------------------------------
