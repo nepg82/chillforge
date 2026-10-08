@@ -36,14 +36,14 @@
     }
     .container {
       background-color: var(--card);
-      padding: 28px;
+      padding: 24px;
       border-radius: 16px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.3);
       width: 100%;
       max-width: 440px;
       display: flex;
       flex-direction: column;
-      gap: 18px;
+      gap: 14px;
     }
     h1 {
       margin: 0;
@@ -55,7 +55,7 @@
     }
     h2 {
       margin: 0;
-      font-size: 0.7rem;
+      font-size: 0.4rem;
       font-weight: 600;
       text-align: center;
       color: var(--accent);
@@ -69,30 +69,27 @@
       color: var(--muted);
       border-bottom: 1px solid var(--border);
       padding-bottom: 4px;
-      margin-top: 4px;
+      margin-top: 6px;
     }
     .control-group { display: flex; flex-direction: column; gap: 6px; }
     .control-group[hidden] { display: none; }
+    #controls { display: flex; flex-direction: column; gap: 8px; }
     label {
       font-size: 0.85rem;
       font-weight: 600;
-      display: flex;
-      justify-content: space-between;
-      width: 100%;
     }
-    label span { color: var(--accent); }
-    input[type=range], select {
+    select {
       width: 100%;
+      height: 44px;
       background: var(--bg);
       color: var(--text);
       border: 1px solid var(--border);
       border-radius: 8px;
-      padding: 10px;
+      padding: 0 10px;
       font-size: 0.9rem;
       outline: none;
       box-sizing: border-box;
     }
-    input[type=range] { accent-color: var(--accent); padding: 0; height: 6px; cursor: pointer; }
     button {
       background-color: var(--accent);
       color: #1a1a1a;
@@ -103,88 +100,79 @@
       font-weight: 700;
       cursor: pointer;
       transition: opacity 0.2s, transform 0.1s;
+      touch-action: manipulation;
     }
     button:hover { opacity: 0.9; }
     button:active { transform: scale(0.98); }
     button.playing { background-color: #e76f51; }
+
+    /* Compact stepper / select rows: label | control */
+    .row {
+      display: grid;
+      grid-template-columns: 4.6rem 44px 1fr 44px;
+      gap: 8px;
+      align-items: center;
+    }
+    .row.sel { grid-template-columns: 4.6rem 1fr; }
+    .row .lbl { font-size: 0.85rem; font-weight: 600; text-align: right; }
+    .step {
+      height: 44px;
+      padding: 0;
+      font-size: 1.4rem;
+      line-height: 1;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .step:disabled { opacity: 0.3; cursor: default; }
+    .val {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 0.95rem;
+      font-variant-numeric: tabular-nums;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261008-1003</h2>
+    <h2>261008-1458</h2>
 
     <button id="playBtn">Start Beat</button>
 
     <div class="control-group">
-      <label for="modeSelect">Vibe / Mode</label>
-      <select id="modeSelect">
-        <option value="study">Read / Study (Standard Beat)</option>
-        <option value="calm">Calm Down (Muted Drums, Soft Synth)</option>
-        <option value="sleep">Deep Calm / Sleep (No Drums, Ambient)</option>
+      <label for="styleSelect">Style</label>
+      <select id="styleSelect"></select>
+    </div>
+
+    <div class="control-group">
+      <label for="intensitySelect">Intensity</label>
+      <select id="intensitySelect">
+        <option value="study">Standard (Read / Study)</option>
+        <option value="calm">Calm (Muted Drums, Soft Synth)</option>
+        <option value="sleep">Sleep (No Drums, Ambient)</option>
       </select>
     </div>
 
-    <!-- Filled from PROGRESSIONS below; hidden while only one exists -->
     <div class="control-group" id="progGroup">
       <label for="progSelect">Chord Progression</label>
       <select id="progSelect"></select>
     </div>
 
-    <div class="control-group">
-      <label for="bpmSlider">Tempo (BPM) <span id="bpmVal">83</span></label>
-      <input type="range" id="bpmSlider" min="55" max="95" value="83">
-    </div>
-
-    <div class="section-title">Channel Mixer</div>
-
-    <div class="control-group">
-      <label for="masterVol">Master Volume <span id="masterVal">-6 dB</span></label>
-      <input type="range" id="masterVol" min="-40" max="0" value="-6">
-    </div>
-
-    <div class="control-group">
-      <label for="drumsVol">Drums Volume <span id="drumsVal">0 dB</span></label>
-      <input type="range" id="drumsVol" min="-40" max="6" value="0">
-    </div>
-
-    <div class="control-group">
-      <label for="padVol">Chords / Pad Volume <span id="padVal">0 dB</span></label>
-      <input type="range" id="padVol" min="-40" max="6" value="0">
-    </div>
-
-    <div class="control-group">
-      <label for="padShape">Chords / Pad Shape</label>
-      <select id="padShape">
-        <option value="triangle" selected>Triangle (Warm/Soft)</option>
-        <option value="softtri">Soft Triangle (Rounded/Mellow)</option>
-        <option value="sine">Sine (Pure/Mellow)</option>
-        <option value="sawtooth">Sawtooth (Bright/Buzzy)</option>
-        <option value="square">Square (Hollow/Retro)</option>
-      </select>
-    </div>
-
-    <div class="control-group">
-      <label for="melodyVol">Melody Volume <span id="melodyVal">0 dB</span></label>
-      <input type="range" id="melodyVol" min="-40" max="6" value="0">
-    </div>
-
-    <div class="control-group">
-      <label for="melodyShape">Melody Shape</label>
-      <select id="melodyShape">
-        <option value="sine" selected>Sine (Pure/Mellow)</option>
-        <option value="softtri">Soft Triangle (Rounded/Mellow)</option>
-        <option value="triangle">Triangle (Warm/Soft)</option>
-        <option value="sawtooth">Sawtooth (Bright/Buzzy)</option>
-        <option value="square">Square (Hollow/Retro)</option>
-      </select>
-    </div>
+    <!-- Tempo, mixer and shape selectors are built from the current style -->
+    <div id="controls"></div>
   </div>
 
   <script>
     // ---------------------------------------------------------------
-    // Data: add new progressions here. Each chord is a list of notes;
-    // the dropdown appears automatically once there are two or more.
+    // Data: progressions. Each chord is a list of notes.
     // ---------------------------------------------------------------
     const PROGRESSIONS = {
       jazz251: {
@@ -234,8 +222,44 @@
       }
     };
 
-    // Per-mode settings: master filter cutoff, drum level, melody density.
-    const MODES = {
+    // ---------------------------------------------------------------
+    // Styles: everything that differs between genres lives here.
+    // The tempo row, mixer rows and shape selectors are generated from it.
+    // ---------------------------------------------------------------
+    const SHAPE_LABELS = {
+      triangle: "Triangle (Warm/Soft)",
+      softtri:  "Soft Triangle (Rounded/Mellow)",
+      sine:     "Sine (Pure/Mellow)",
+      sawtooth: "Sawtooth (Bright/Buzzy)",
+      square:   "Square (Hollow/Retro)"
+    };
+    const shapeOpts = (order) => order.map((v) => [v, SHAPE_LABELS[v]]);
+
+    const MASTER = { id: "master", label: "Master", max: 0, def: -6 };
+    const VOL_MIN = -40;
+
+    const STYLES = {
+      chillwave: {
+        label: "Chillwave",
+        bpm: { min: 55, max: 95, def: 83 },
+        swing: 0.16,                        // delay on off-16ths, fraction of a step
+        progs: Object.keys(PROGRESSIONS),
+        channels: [                         // mixer rows (Master is always added first)
+          { id: "drums",  label: "Drums",  max: 6, def: 0 },
+          { id: "pad",    label: "Pad",    max: 6, def: 0 },
+          { id: "melody", label: "Melody", max: 6, def: 0 }
+        ],
+        selects: [                          // pulldowns under the mixer
+          { id: "padShape",    label: "Pad",    def: "triangle",
+            options: shapeOpts(["triangle", "softtri", "sine", "sawtooth", "square"]) },
+          { id: "melodyShape", label: "Melody", def: "sine",
+            options: shapeOpts(["sine", "softtri", "triangle", "sawtooth", "square"]) }
+        ]
+      }
+    };
+
+    // Intensity: master filter cutoff, drum level, melody density. Applies to every style.
+    const INTENSITY = {
       study: { cutoff: 2500, drums: 1,    melody: 0.55 },
       calm:  { cutoff: 1200, drums: 0.45, melody: 0.4  },
       sleep: { cutoff: 450,  drums: 0,    melody: 0.25 }
@@ -244,24 +268,28 @@
     // Waveform loudness compensation so shapes sit at similar levels.
     const SHAPE_LEVEL = { sine: 1.2, softtri: 1.1, triangle: 1, sawtooth: 0.4, square: 0.35 };
 
-    const SWING = 0.16;        // delay on off-16ths, as a fraction of a step
     const LOOKAHEAD = 0.2;     // seconds scheduled ahead of the audio clock
     const TICK_MS = 25;        // scheduler wake-up interval
 
     // ---------------------------------------------------------------
     // State
     // ---------------------------------------------------------------
-    let ctx = null, g = null, noiseBuf = null, timer = null;
+    let ctx = null, g = null, noiseBuf = null, timer = null, silentEl = null;
     let playing = false;
-    let bpm = 83, step = 0, nextTime = 0, chordIdx = 0;
+    let step = 0, nextTime = 0, chordIdx = 0;
     let currentChord = null, lastMelodyNote = null;
-    let progKey = Object.keys(PROGRESSIONS)[0];
-    let mode = MODES.study;
-    let padShape = "triangle", melodyShape = "sine";
-    let silentEl = null;
-    const vol = { master: -6, drums: 0, pad: 0, melody: 0 };
+
+    // Per-style settings (tempo, levels, pulldowns, progression), remembered separately.
+    let styleKey = Object.keys(STYLES)[0];
+    let intensityKey = "study";
+    let inten = INTENSITY.study;
+    const store = {};
+    let S = null;                          // settings of the current style
 
     const $ = (id) => document.getElementById(id);
+    const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+    const chanDefs = (st) => [MASTER, ...st.channels];
 
     // ---------------------------------------------------------------
     // Helpers
@@ -272,33 +300,6 @@
       const midi = (parseInt(m[3], 10) + 1) * 12 + SEMI[m[1]] + (m[2] === "#" ? 1 : m[2] === "b" ? -1 : 0);
       return 440 * Math.pow(2, (midi - 69) / 12);
     }
-    
-    // A real (non-empty) 1-second silent WAV, so looping can't spin the main thread.
-	function makeSilentUrl() {
-	  const rate = 8000, n = rate * 10;            // 10 seconds, 16-bit mono
-	  const buf = new ArrayBuffer(44 + n * 2);
-	  const v = new DataView(buf);
-	  const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
-	  w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
-	  v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
-	  v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
-	  v.setUint16(32, 2, true); v.setUint16(34, 16, true);
-	  w(36, "data"); v.setUint32(40, n * 2, true);
-	
-	  // Near-silent samples (about -90 dB) so the OS treats this as real audio.
-	  for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, i % 2 ? 1 : -1, true);
-
-	  return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
-	}
-
-	function ensureSilentEl() {
-	  if (silentEl) return;
-	  silentEl = new Audio(makeSilentUrl());
-	  silentEl.loop = true;
-	  // If the OS/headset pauses the element directly, stop the beat to match.
-	  silentEl.addEventListener("pause", () => { if (playing) stopBeat(); });
-	}
-    
     // Custom waveform: sine plus triangle overtones at OVERTONE_MIX of full
     // strength (0 = sine, 1 = triangle). Built once, then reused.
     const OVERTONE_MIX = 0.5;
@@ -316,9 +317,9 @@
       }
       osc.setPeriodicWave(waveCache[shape]);
     }
-    const dbToGain = (db) => (db <= -40 ? 0 : Math.pow(10, db / 20));
+    const dbToGain = (db) => (db <= VOL_MIN ? 0 : Math.pow(10, db / 20));
     const rand = (a, b) => a + Math.random() * (b - a);
-    const stepDur = () => 60 / bpm / 4;
+    const stepDur = () => 60 / S.bpm / 4;
 
     // Scheduler tick from a Worker so it isn't throttled in background tabs.
     function makeTimer(cb, ms) {
@@ -331,6 +332,28 @@
         let id;
         return { start() { id = setInterval(cb, ms); }, stop() { clearInterval(id); } };
       }
+    }
+
+    // A real (non-empty) near-silent WAV so the OS treats the page as a media player.
+    function makeSilentUrl() {
+      const rate = 8000, n = rate * 10;            // 10 seconds, 16-bit mono
+      const buf = new ArrayBuffer(44 + n * 2);
+      const v = new DataView(buf);
+      const w = (o, s) => { for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i)); };
+      w(0, "RIFF"); v.setUint32(4, 36 + n * 2, true); w(8, "WAVE"); w(12, "fmt ");
+      v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+      v.setUint32(24, rate, true); v.setUint32(28, rate * 2, true);
+      v.setUint16(32, 2, true); v.setUint16(34, 16, true);
+      w(36, "data"); v.setUint32(40, n * 2, true);
+      for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, i % 2 ? 1 : -1, true);
+      return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
+    }
+    function ensureSilentEl() {
+      if (silentEl) return;
+      silentEl = new Audio(makeSilentUrl());
+      silentEl.loop = true;
+      // If the OS/headset pauses the element directly, stop the beat to match.
+      silentEl.addEventListener("pause", () => { if (playing) stopBeat(); });
     }
 
     // ---------------------------------------------------------------
@@ -355,13 +378,13 @@
     function buildGraph() {
       const n = {};
       n.out = ctx.createGain();
-      n.out.gain.value = dbToGain(vol.master);
+      n.out.gain.value = dbToGain(S.vol.master);
       n.comp = ctx.createDynamicsCompressor();   // safety limiter
       n.comp.threshold.value = -10;
       n.comp.ratio.value = 6;
       n.filter = ctx.createBiquadFilter();
       n.filter.type = "lowpass";
-      n.filter.frequency.value = mode.cutoff;
+      n.filter.frequency.value = inten.cutoff;
       n.filter.connect(n.comp).connect(n.out).connect(ctx.destination);
 
       n.drums = ctx.createGain();  n.drums.connect(n.filter);
@@ -384,7 +407,7 @@
 
       // Melody echo (dotted eighth)
       n.delay = ctx.createDelay(2);
-      n.delay.delayTime.value = 45 / bpm;
+      n.delay.delayTime.value = 45 / S.bpm;
       const send = ctx.createGain(); send.gain.value = 0.3;
       const fb = ctx.createGain();   fb.gain.value = 0.38;
       const dLP = ctx.createBiquadFilter();
@@ -407,29 +430,33 @@
     function applyMixer(instant) {
       if (!g) return;
       const t = ctx.currentTime, tc = instant ? 0.001 : 0.03;
-      g.out.gain.setTargetAtTime(dbToGain(vol.master), t, tc);
-      g.drums.gain.setTargetAtTime(dbToGain(vol.drums) * mode.drums, t, tc);
-      g.pad.gain.setTargetAtTime(dbToGain(vol.pad), t, tc);
-      g.melody.gain.setTargetAtTime(dbToGain(vol.melody), t, tc);
-      g.filter.frequency.setTargetAtTime(mode.cutoff, t, instant ? 0.001 : 0.15);
+      g.out.gain.setTargetAtTime(dbToGain(S.vol.master), t, tc);
+      STYLES[styleKey].channels.forEach((c) => {
+        const node = g[c.id];
+        if (!node) return;
+        const scale = c.id === "drums" ? inten.drums : 1;
+        node.gain.setTargetAtTime(dbToGain(S.vol[c.id]) * scale, t, tc);
+      });
+      g.filter.frequency.setTargetAtTime(inten.cutoff, t, instant ? 0.001 : 0.15);
     }
 
     // ---------------------------------------------------------------
     // Voices
     // ---------------------------------------------------------------
     function playChord(t) {
-      const chords = PROGRESSIONS[progKey].chords;
+      const chords = PROGRESSIONS[S.prog].chords;
       const chord = chords[chordIdx % chords.length];
       chordIdx++;
       currentChord = chord;
 
+      const shape = S.sel.padShape;
       const dur = 16 * stepDur();
-      const peak = (0.7 / chord.length) * SHAPE_LEVEL[padShape];
+      const peak = (0.7 / chord.length) * SHAPE_LEVEL[shape];
       chord.forEach((note, i) => {
         const ts = t + i * 0.012;                    // slight strum
         const o = ctx.createOscillator();
         const gn = ctx.createGain();
-        applyShape(o, padShape);
+        applyShape(o, shape);
         o.frequency.value = noteFreq(note);
         o.detune.value = rand(-6, 6);
         gn.gain.setValueAtTime(0.0001, ts);
@@ -448,13 +475,14 @@
       while (note === lastMelodyNote && currentChord.length > 1);
       lastMelodyNote = note;
 
+      const shape = S.sel.melodyShape;
       const units = [1, 1, 1, 2, 2, 3, 4][Math.floor(Math.random() * 7)];
       const dur = units * stepDur();
-      const peak = 0.2 * SHAPE_LEVEL[melodyShape];
+      const peak = 0.2 * SHAPE_LEVEL[shape];
 
       const o = ctx.createOscillator();
       const gn = ctx.createGain();
-      applyShape(o, melodyShape);
+      applyShape(o, shape);
       o.frequency.value = noteFreq(note) * 2;
       gn.gain.setValueAtTime(0.0001, t);
       gn.gain.linearRampToValueAtTime(peak, t + 0.03);
@@ -512,11 +540,11 @@
     // ---------------------------------------------------------------
     function scheduleStep(s, t) {
       const sd = stepDur();
-      if (s % 2 === 1) t += sd * SWING;          // swing the off-16ths
+      if (s % 2 === 1) t += sd * STYLES[styleKey].swing;   // swing the off-16ths
 
       if (s === 0) playChord(t);
 
-      if (mode.drums > 0) {
+      if (inten.drums > 0) {
         const jt = t + rand(-0.005, 0.005);      // human timing
         if (s === 0) kick(jt, 1);
         else if (s === 6 && Math.random() < 0.4) kick(jt, 0.8);
@@ -528,7 +556,7 @@
         else if (Math.random() < 0.15) hat(jt, 0.3);
       }
 
-      if (s % 2 === 0 && Math.random() < mode.melody) playMelody(t);
+      if (s % 2 === 0 && Math.random() < inten.melody) playMelody(t);
     }
 
     function tick() {
@@ -543,122 +571,263 @@
     }
 
     // ---------------------------------------------------------------
-    // UI wiring
+    // Settings: per-style memory, saved between visits
     // ---------------------------------------------------------------
-    const progSelect = $("progSelect");
-    Object.keys(PROGRESSIONS).forEach((key) => {
-      const opt = document.createElement("option");
-      opt.value = key;
-      opt.textContent = PROGRESSIONS[key].label;
-      progSelect.appendChild(opt);
-    });
-    $("progGroup").hidden = Object.keys(PROGRESSIONS).length < 2;
-    progSelect.addEventListener("change", (e) => { progKey = e.target.value; chordIdx = 0; });
+    const SAVE_KEY = "chillforge-v3";
 
-	function startBeat() {
-	  if (playing) return;
-	  if (!ctx) initContext();
-	  ensureSilentEl();
-	  ctx.resume();
-	  silentEl.play().catch(() => {});
-	  buildGraph();
-	  step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
-	  nextTime = ctx.currentTime + 0.1;
-	  playing = true;
-	  timer.start();
-	  $("playBtn").textContent = "Stop Beat";
-	  $("playBtn").classList.add("playing");
-	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
-	}
+    function newState(key) {
+      const st = STYLES[key];
+      const vol = {};
+      chanDefs(st).forEach((c) => { vol[c.id] = c.def; });
+      const sel = {};
+      st.selects.forEach((s) => { sel[s.id] = s.def; });
+      return { bpm: st.bpm.def, vol, sel, prog: st.progs[0] };
+    }
 
-	function stopBeat() {
-	  if (!playing) return;
-	  playing = false;                 // set first so the element's pause listener is a no-op
-	  timer.stop();
-	  teardownGraph();
-	  if (silentEl) silentEl.pause();
-	  $("playBtn").textContent = "Start Beat";
-	  $("playBtn").classList.remove("playing");
-	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
-	}
-
-	// Beat is "playing" on paper but the audio died: rebuild without touching the silent element.
-	function restartBeat() {
-	  playing = false;
-	  timer.stop();
-	  teardownGraph();
-	  startBeat();
-	}
-
-	$("playBtn").addEventListener("click", () => (playing ? stopBeat() : startBeat()));
-
-	// Bluetooth / lock-screen controls
-	if ("mediaSession" in navigator) {
-	  try {
-	    navigator.mediaSession.metadata = new MediaMetadata({
-	      title: "Chillforge",
-	      artist: "Generative lo-fi beat",
-	      artwork: [
-	        { src: "app-icons/app-icon-192.png", sizes: "192x192", type: "image/png" },
-	        { src: "app-icons/app-icon-512.png", sizes: "512x512", type: "image/png" }
-	      ]
-	    });
-	    navigator.mediaSession.setActionHandler("play", () => (playing ? restartBeat() : startBeat()));
-	    navigator.mediaSession.setActionHandler("pause", stopBeat);
-	    navigator.mediaSession.setActionHandler("stop", stopBeat);
-	  } catch (e) {}
-	}
-
-    $("bpmSlider").addEventListener("input", (e) => {
-      bpm = parseInt(e.target.value, 10);
-      $("bpmVal").textContent = bpm;
-      if (g) g.delay.delayTime.setTargetAtTime(45 / bpm, ctx.currentTime, 0.05);
-    });
-
-    ["master", "drums", "pad", "melody"].forEach((ch) => {
-      $(ch + "Vol").addEventListener("input", (e) => {
-        vol[ch] = parseFloat(e.target.value);
-        $(ch + "Val").textContent = vol[ch] <= -40 ? "Off" : vol[ch] + " dB";
-        applyMixer();
+    // Copy any valid values from src into store[key]; ignore anything invalid.
+    function mergeState(key, src) {
+      if (!src) return;
+      const st = STYLES[key], d = store[key];
+      const bpm = Number(src.bpm);
+      if (isFinite(bpm)) d.bpm = clamp(Math.round(bpm), st.bpm.min, st.bpm.max);
+      chanDefs(st).forEach((c) => {
+        const v = Number(src.vol && src.vol[c.id]);
+        if (isFinite(v)) d.vol[c.id] = clamp(Math.round(v), VOL_MIN, c.max);
       });
+      st.selects.forEach((s) => {
+        const v = src.sel && src.sel[s.id];
+        if (s.options.some((o) => o[0] === v)) d.sel[s.id] = v;
+      });
+      if (st.progs.includes(src.prog)) d.prog = src.prog;
+    }
+
+    function loadSettings() {
+      Object.keys(STYLES).forEach((k) => { store[k] = newState(k); });
+      try {
+        const raw = localStorage.getItem(SAVE_KEY);
+        if (raw) {
+          const o = JSON.parse(raw);
+          if (STYLES[o.style]) styleKey = o.style;
+          if (INTENSITY[o.intensity]) intensityKey = o.intensity;
+          Object.keys(STYLES).forEach((k) => mergeState(k, (o.store || {})[k]));
+        } else {
+          // One-time migration from the old slider-based settings.
+          const old = JSON.parse(localStorage.getItem("chillforge-settings") || "null");
+          if (old) {
+            mergeState("chillwave", {
+              bpm: old.bpmSlider, prog: old.progSelect,
+              vol: { master: old.masterVol, drums: old.drumsVol, pad: old.padVol, melody: old.melodyVol },
+              sel: { padShape: old.padShape, melodyShape: old.melodyShape }
+            });
+            if (INTENSITY[old.modeSelect]) intensityKey = old.modeSelect;
+          }
+        }
+      } catch (e) {}
+      S = store[styleKey];
+      inten = INTENSITY[intensityKey];
+    }
+
+    let saveTimer = null;
+    function saveSettings() {
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        try {
+          localStorage.setItem(SAVE_KEY, JSON.stringify({ style: styleKey, intensity: intensityKey, store }));
+        } catch (e) {}
+      }, 300);
+    }
+
+    // ---------------------------------------------------------------
+    // UI: steppers (tap, or hold to repeat and speed up)
+    // ---------------------------------------------------------------
+    let holdStop = null;
+    ["pointerup", "pointercancel"].forEach((ev) =>
+      window.addEventListener(ev, () => { if (holdStop) holdStop(); }));
+
+    function holdable(btn, fn) {
+      btn.addEventListener("pointerdown", (e) => {
+        if (e.button !== 0 || btn.disabled) return;
+        e.preventDefault();
+        fn();
+        let n = 0, to;
+        const run = () => { fn(); n++; to = setTimeout(run, n > 12 ? 40 : 110); };
+        to = setTimeout(run, 400);
+        holdStop = () => { clearTimeout(to); holdStop = null; };
+      });
+      btn.addEventListener("click", (e) => { if (e.detail === 0) fn(); });   // keyboard
+      btn.addEventListener("contextmenu", (e) => e.preventDefault());
+    }
+
+    function stepperRow(label, get, set, min, max, fmt) {
+      const row = el("div", "row");
+      const lbl = el("div", "lbl"); lbl.textContent = label;
+      const dec = el("button", "step"); dec.textContent = "\u2212"; dec.setAttribute("aria-label", label + " down");
+      const val = el("div", "val");
+      const inc = el("button", "step"); inc.textContent = "+"; inc.setAttribute("aria-label", label + " up");
+      const show = () => {
+        val.textContent = fmt(get());
+        dec.disabled = get() <= min;
+        inc.disabled = get() >= max;
+      };
+      const bump = (d) => () => {
+        const v = clamp(get() + d, min, max);
+        if (v === get()) return;
+        set(v); show(); saveSettings();
+      };
+      holdable(dec, bump(-1));
+      holdable(inc, bump(1));
+      show();
+      row.append(lbl, dec, val, inc);
+      return row;
+    }
+
+    const fmtDb = (v) => (v <= VOL_MIN ? "Off" : (v > 0 ? "+" : "") + v + " dB");
+
+    function buildControls() {
+      const st = STYLES[styleKey], box = $("controls");
+      box.textContent = "";
+
+      box.appendChild(stepperRow("Tempo", () => S.bpm, (v) => {
+        S.bpm = v;
+        if (g) g.delay.delayTime.setTargetAtTime(45 / S.bpm, ctx.currentTime, 0.05);
+      }, st.bpm.min, st.bpm.max, String));
+
+      const title = el("div", "section-title"); title.textContent = "Channel Mixer";
+      box.appendChild(title);
+
+      chanDefs(st).forEach((c) => {
+        box.appendChild(stepperRow(c.label, () => S.vol[c.id], (v) => {
+          S.vol[c.id] = v;
+          applyMixer();
+        }, VOL_MIN, c.max, fmtDb));
+      });
+
+      const sep = el("div", "section-title"); sep.textContent = "Sound";
+      box.appendChild(sep);
+
+      st.selects.forEach((s) => {
+        const row = el("div", "row sel");
+        const lbl = el("div", "lbl"); lbl.textContent = s.label;
+        const sel = el("select");
+        sel.setAttribute("aria-label", s.label + " sound");
+        s.options.forEach(([v, text]) => {
+          const o = el("option"); o.value = v; o.textContent = text; sel.appendChild(o);
+        });
+        sel.value = S.sel[s.id];
+        sel.addEventListener("change", () => { S.sel[s.id] = sel.value; saveSettings(); });
+        row.append(lbl, sel);
+        box.appendChild(row);
+      });
+    }
+
+    function fillProgressions() {
+      const st = STYLES[styleKey], sel = $("progSelect");
+      sel.textContent = "";
+      st.progs.forEach((key) => {
+        const o = el("option"); o.value = key; o.textContent = PROGRESSIONS[key].label; sel.appendChild(o);
+      });
+      sel.value = S.prog;
+      $("progGroup").hidden = st.progs.length < 2;
+    }
+
+    function switchStyle(key) {
+      styleKey = key;
+      S = store[key];
+      chordIdx = 0;
+      buildControls();
+      fillProgressions();
+      applyMixer();
+      if (g) g.delay.delayTime.setTargetAtTime(45 / S.bpm, ctx.currentTime, 0.05);
+      saveSettings();
+    }
+
+    // ---------------------------------------------------------------
+    // Transport
+    // ---------------------------------------------------------------
+    function startBeat() {
+      if (playing) return;
+      if (!ctx) initContext();
+      ensureSilentEl();
+      ctx.resume();
+      silentEl.play().catch(() => {});
+      buildGraph();
+      step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
+      nextTime = ctx.currentTime + 0.1;
+      playing = true;
+      timer.start();
+      $("playBtn").textContent = "Stop Beat";
+      $("playBtn").classList.add("playing");
+      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+    }
+
+    function stopBeat() {
+      if (!playing) return;
+      playing = false;                 // set first so the element's pause listener is a no-op
+      timer.stop();
+      teardownGraph();
+      if (silentEl) silentEl.pause();
+      $("playBtn").textContent = "Start Beat";
+      $("playBtn").classList.remove("playing");
+      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+    }
+
+    // Beat is "playing" on paper but the audio died: rebuild without touching the silent element.
+    function restartBeat() {
+      playing = false;
+      timer.stop();
+      teardownGraph();
+      startBeat();
+    }
+
+    $("playBtn").addEventListener("click", () => (playing ? stopBeat() : startBeat()));
+
+    // ---------------------------------------------------------------
+    // Init
+    // ---------------------------------------------------------------
+    loadSettings();
+
+    const styleSelect = $("styleSelect");
+    Object.keys(STYLES).forEach((key) => {
+      const o = el("option"); o.value = key; o.textContent = STYLES[key].label; styleSelect.appendChild(o);
+    });
+    styleSelect.value = styleKey;
+    styleSelect.addEventListener("change", (e) => switchStyle(e.target.value));
+
+    $("intensitySelect").value = intensityKey;
+    $("intensitySelect").addEventListener("change", (e) => {
+      intensityKey = e.target.value;
+      inten = INTENSITY[intensityKey];
+      applyMixer();
+      saveSettings();
     });
 
-    $("padShape").addEventListener("change", (e) => { padShape = e.target.value; });
-    $("melodyShape").addEventListener("change", (e) => { melodyShape = e.target.value; });
-    $("modeSelect").addEventListener("change", (e) => { mode = MODES[e.target.value]; applyMixer(); });
+    $("progSelect").addEventListener("change", (e) => { S.prog = e.target.value; chordIdx = 0; saveSettings(); });
 
-    // Remember control positions between visits
-    const SAVED_IDS = ["modeSelect", "progSelect", "bpmSlider", "masterVol", "drumsVol",
-                       "padVol", "padShape", "melodyVol", "melodyShape"];
-    function saveSettings() {
+    buildControls();
+    fillProgressions();
+
+    // Bluetooth / lock-screen controls
+    if ("mediaSession" in navigator) {
       try {
-        const o = {};
-        SAVED_IDS.forEach((id) => { o[id] = $(id).value; });
-        localStorage.setItem("chillforge-settings", JSON.stringify(o));
-      } catch (e) {}
-    }
-    function loadSettings() {
-      try {
-        const o = JSON.parse(localStorage.getItem("chillforge-settings") || "null");
-        if (!o) return;
-        SAVED_IDS.forEach((id) => {
-          const el = $(id);
-          if (o[id] === undefined) return;
-          el.value = o[id];
-          if (el.value !== String(o[id])) return;   // option no longer exists
-          el.dispatchEvent(new Event(el.tagName === "SELECT" ? "change" : "input"));
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: "Chillforge",
+          artist: "Generative lo-fi beat",
+          artwork: [
+            { src: "app-icons/app-icon-192.png", sizes: "192x192", type: "image/png" },
+            { src: "app-icons/app-icon-512.png", sizes: "512x512", type: "image/png" }
+          ]
         });
+        navigator.mediaSession.setActionHandler("play", () => (playing ? restartBeat() : startBeat()));
+        navigator.mediaSession.setActionHandler("pause", stopBeat);
+        navigator.mediaSession.setActionHandler("stop", stopBeat);
       } catch (e) {}
     }
-    loadSettings();
-    document.addEventListener("input", saveSettings);
-    document.addEventListener("change", saveSettings);
 
     document.addEventListener("visibilitychange", () => {
-	  if (document.hidden || !playing) return;
-	  if (silentEl && silentEl.paused) { stopBeat(); return; }   // OS paused us: show the truth
-	  if (ctx.state !== "running") ctx.resume().catch(() => {});
-	});
+      if (document.hidden || !playing) return;
+      if (silentEl && silentEl.paused) { stopBeat(); return; }   // OS paused us: show the truth
+      if (ctx.state !== "running") ctx.resume().catch(() => {});
+    });
 
     // PWA: offline support / installability
     if ("serviceWorker" in navigator) {
