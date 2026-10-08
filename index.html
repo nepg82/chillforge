@@ -55,7 +55,7 @@
     }
     h2 {
       margin: 0;
-      font-size: 0.4rem;
+      font-size: 0.7rem;
       font-weight: 600;
       text-align: center;
       color: var(--accent);
@@ -115,6 +115,17 @@
     }
     .row.sel { grid-template-columns: 4.6rem 1fr; }
     .row .lbl { font-size: 0.85rem; font-weight: 600; text-align: right; }
+
+    /* Two-column stepper grid: label above, [-] value [+] below */
+    .cells {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 14px;
+    }
+    .cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .cell .lbl { font-size: 0.8rem; font-weight: 600; text-align: center; color: var(--muted); }
+    .ctl { display: grid; grid-template-columns: 44px 1fr 44px; gap: 6px; }
+    .divider { grid-column: 1 / -1; border-top: 1px solid var(--border); margin: 4px 0 2px; }
     .step {
       height: 44px;
       padding: 0;
@@ -143,7 +154,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261008-1458</h2>
+    <h2>261008-1509</h2>
 
     <button id="playBtn">Start Beat</button>
 
@@ -659,8 +670,9 @@
     }
 
     function stepperRow(label, get, set, min, max, fmt) {
-      const row = el("div", "row");
+      const cell = el("div", "cell");
       const lbl = el("div", "lbl"); lbl.textContent = label;
+      const ctl = el("div", "ctl");
       const dec = el("button", "step"); dec.textContent = "\u2212"; dec.setAttribute("aria-label", label + " down");
       const val = el("div", "val");
       const inc = el("button", "step"); inc.textContent = "+"; inc.setAttribute("aria-label", label + " up");
@@ -677,8 +689,9 @@
       holdable(dec, bump(-1));
       holdable(inc, bump(1));
       show();
-      row.append(lbl, dec, val, inc);
-      return row;
+      ctl.append(dec, val, inc);
+      cell.append(lbl, ctl);
+      return cell;
     }
 
     const fmtDb = (v) => (v <= VOL_MIN ? "Off" : (v > 0 ? "+" : "") + v + " dB");
@@ -687,23 +700,24 @@
       const st = STYLES[styleKey], box = $("controls");
       box.textContent = "";
 
-      box.appendChild(stepperRow("Tempo", () => S.bpm, (v) => {
+      const cells = el("div", "cells");
+      box.appendChild(cells);
+
+      cells.appendChild(stepperRow("Tempo", () => S.bpm, (v) => {
         S.bpm = v;
         if (g) g.delay.delayTime.setTargetAtTime(45 / S.bpm, ctx.currentTime, 0.05);
       }, st.bpm.min, st.bpm.max, String));
 
-      const title = el("div", "section-title"); title.textContent = "Channel Mixer";
-      box.appendChild(title);
+      const volCell = (c, label) => stepperRow(label || c.label, () => S.vol[c.id], (v) => {
+        S.vol[c.id] = v;
+        applyMixer();
+      }, VOL_MIN, c.max, fmtDb);
 
-      chanDefs(st).forEach((c) => {
-        box.appendChild(stepperRow(c.label, () => S.vol[c.id], (v) => {
-          S.vol[c.id] = v;
-          applyMixer();
-        }, VOL_MIN, c.max, fmtDb));
-      });
+      cells.appendChild(volCell(MASTER, "Volume"));
+      cells.appendChild(el("div", "divider"));
+      st.channels.forEach((c) => cells.appendChild(volCell(c)));
 
-      const sep = el("div", "section-title"); sep.textContent = "Sound";
-      box.appendChild(sep);
+      box.appendChild(el("div", "divider"));
 
       st.selects.forEach((s) => {
         const row = el("div", "row sel");
