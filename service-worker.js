@@ -1,4 +1,4 @@
-const CACHE_NAME = "chillforge-cache-v2.0.7";
+const CACHE_NAME = "chillforge-cache-v2.0.8";
 
 const APP_SHELL = [
   "./",
@@ -11,7 +11,16 @@ const APP_SHELL = [
 // Install: Cache all assets cleanly
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL))
+    caches.open(CACHE_NAME).then((cache) =>
+      Promise.all(
+        APP_SHELL.map((url) =>
+          fetch(url, { cache: "reload" }).then((res) => {
+            if (!res.ok) throw new Error(url + " " + res.status);
+            return cache.put(url, res);
+          })
+        )
+      )
+    )
   );
   self.skipWaiting();
 });
