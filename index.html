@@ -154,7 +154,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261011-1937</h2>
+    <h2>261011-1946</h2>
 
     <button id="playBtn">Start Beat</button>
 
@@ -267,6 +267,45 @@
       }
     });
 
+    Object.assign(PROGRESSIONS, {
+      phrygian: {
+        label: "i - bII - i - bVII (Phrygian Dread)",
+        chords: [
+          ["E2", "B2", "E3", "G3"],        // Em
+          ["F2", "C3", "F3", "A3"],        // F
+          ["E2", "B2", "E3", "G3"],        // Em
+          ["D2", "A2", "D3", "F#3"]        // D
+        ]
+      },
+      pursuit: {
+        label: "i - iv - VI - V (Harmonic Minor Pursuit)",
+        chords: [
+          ["A2", "E3", "A3", "C4"],        // Am
+          ["D3", "A3", "D4", "F4"],        // Dm
+          ["F2", "C3", "F3", "A3"],        // F
+          ["E2", "B2", "E3", "G#3"]        // E
+        ]
+      },
+      abyss: {
+        label: "i - bVI - bVII - i (Abyss)",
+        chords: [
+          ["C3", "G3", "C4", "Eb4"],       // Cm
+          ["Ab2", "Eb3", "Ab3", "C4"],     // Ab
+          ["Bb2", "F3", "Bb3", "D4"],      // Bb
+          ["C3", "G3", "C4", "Eb4"]        // Cm
+        ]
+      },
+      chase: {
+        label: "i - bVII - bVI - V (Midnight Chase)",
+        chords: [
+          ["G2", "D3", "G3", "Bb3"],       // Gm
+          ["F2", "C3", "F3", "A3"],        // F
+          ["Eb2", "Bb2", "Eb3", "G3"],     // Eb
+          ["D3", "A3", "D4", "F#4"]        // D
+        ]
+      }
+    });
+
     const SHAPE_LABELS = {
       triangle: "Triangle (Warm/Soft)",
       softtri:  "Soft Triangle (Rounded/Mellow)",
@@ -307,6 +346,7 @@
       swing: 0,
       progs: ["neon", "andalusian", "sunset", "midnight"],
       lead: "arp", drums: "synth", jitter: 0.002,
+      bassPattern: "pulse", scenes: "synth",
       cutoffMul: 1.8, padCutoff: 2600, reverb: 0.35, echo: 0.25,
       channels: [
         { id: "drums", label: "Drums", max: 6, def: 0 },
@@ -326,6 +366,38 @@
       ]
     };
 
+    STYLES.darksynth = {
+      label: "Darksynth",
+      bpm: { min: 90, max: 135, def: 112 },
+      swing: 0,
+      progs: ["phrygian", "pursuit", "abyss", "chase"],
+      lead: "arp", drums: "dark", jitter: 0.002,
+      bassPattern: "gallop", scenes: "dark",
+      arpEvery: 2,                          // arp plays eighths against the sixteenth-note bass
+      drive: 5,                             // bass distortion amount (0 = clean)
+      bassSweep: [380, 1200],               // bass filter sweeps lo -> hi -> lo across each phrase (Hz)
+      cutoffMul: 1.5, padCutoff: 1500, reverb: 0.4, echo: 0.2,
+      channels: [
+        { id: "drums", label: "Drums", max: 6, def: 0 },
+        { id: "bass",  label: "Bass",  max: 6, def: -4 },
+        { id: "pad",   label: "Pad",   max: 6, def: -4 },
+        { id: "arp",   label: "Arp",   max: 6, def: -3 }
+      ],
+      selects: [
+        { id: "bassPattern", label: "Bassline", def: "gallop",
+          options: [["gallop", "Gallop (Eighth + Two 16ths)"], ["driving", "Driving 16ths"],
+                    ["octave", "Octave Bounce (16ths)"], ["pulse", "Pulse (Eighths)"]] },
+        { id: "padShape", label: "Pad", def: "super",
+          options: [["super", "Supersaw (Wide/Lush)"], ["sawtooth", SHAPE_LABELS.sawtooth], ["softtri", SHAPE_LABELS.softtri]] },
+        { id: "arpPattern", label: "Pattern", def: "updown",
+          options: [["up", "Up"], ["updown", "Up-Down"], ["down", "Down"], ["random", "Random (Up/Down Per Bar)"]] },
+        { id: "arpShape", label: "Lead", def: "sawtooth",
+          options: shapeOpts(["sawtooth", "square", "softtri", "triangle", "sine"]) },
+        { id: "variation", label: "Variation", def: "med",
+          options: [["off", "Off (Steady Loop)"], ["low", "Rare (Auto Mute)"], ["med", "Occasional (Auto Mute)"], ["high", "Frequent (Auto Mute)"]] }
+      ]
+    };
+
     // Fixed tone settings (formerly the Intensity "Standard" preset).
     const CUTOFF = 2500;          // master lowpass cutoff (Hz), multiplied by the style's cutoffMul
     const MELODY_DENSITY = 0.55;  // chance of a melody note on each eighth (Chillwave)
@@ -333,17 +405,34 @@
     // Waveform loudness compensation so shapes sit at similar levels.
     const SHAPE_LEVEL = { sine: 1.2, softtri: 1.1, triangle: 1, sawtooth: 0.4, square: 0.35, super: 0.2 };
 
-    // Variation (Synthwave): occasionally mute some channels for a few bars.
+    // Bass patterns: step (0-15) -> null (rest) or { len: steps held, acc: accent, up: octave up }.
+    const BASS_PATTERNS = {
+      pulse:   (s) => (s % 2 === 0 ? { len: 2, acc: s % 4 === 0, up: (s / 2) % 4 === 3 } : null),
+      gallop:  (s) => { const m = s % 4; return m === 1 ? null : { len: m === 0 ? 2 : 1, acc: m === 0, up: false }; },
+      driving: (s) => ({ len: 1, acc: s % 4 === 0, up: false }),
+      octave:  (s) => ({ len: 1, acc: s % 4 === 0, up: s % 2 === 1 })
+    };
+
+    // Variation (Synthwave and Darksynth): occasionally mute some channels for a few bars.
     // Decisions are made only at the start of a phrase (one pass through the progression).
     const VAR_LEVELS = { off: 0, low: 0.08, med: 0.15, high: 0.30 };   // chance per eligible phrase that a scene starts
     const VAR_BARS = [2, 4];      // possible scene lengths, in bars
-    const VAR_SCENES = [          // channels muted in each scene, with relative weights
-      { mute: ["drums"],         w: 3 },
-      { mute: ["arp"],           w: 3 },
-      { mute: ["pad"],           w: 2 },
-      { mute: ["drums", "bass"], w: 1 },
-      { mute: ["pad", "arp"],    w: 1 }
-    ];
+    const VAR_SCENES = {          // channels muted in each scene, with relative weights (per style)
+      synth: [
+        { mute: ["drums"],         w: 3 },
+        { mute: ["arp"],           w: 3 },
+        { mute: ["pad"],           w: 2 },
+        { mute: ["drums", "bass"], w: 1 },
+        { mute: ["pad", "arp"],    w: 1 }
+      ],
+      dark: [
+        { mute: ["drums"],         w: 3 },
+        { mute: ["arp"],           w: 2 },
+        { mute: ["pad"],           w: 2 },
+        { mute: ["pad", "arp"],    w: 2 },   // rhythm section only
+        { mute: ["drums", "bass"], w: 1 }
+      ]
+    };
 
     const LOOKAHEAD = 0.2;     // seconds scheduled ahead of the audio clock
     const TICK_MS = 25;        // scheduler wake-up interval
@@ -484,8 +573,17 @@
         n.bass = ctx.createGain(); n.bass.connect(n.filter);
         n.arp = ctx.createGain();  n.arp.connect(n.filter);
         n.bassFilter = ctx.createBiquadFilter();
-        n.bassFilter.type = "lowpass"; n.bassFilter.frequency.value = 650; n.bassFilter.Q.value = 3;
+        n.bassFilter.type = "lowpass"; n.bassFilter.frequency.value = st.bassSweep ? st.bassSweep[0] : 650;
+        n.bassFilter.Q.value = 3;
         n.bassFilter.connect(n.bass);
+        n.bassIn = n.bassFilter;                     // bass notes enter here
+        if (st.drive) {                              // distort first, then filter the result
+          n.bassShaper = ctx.createWaveShaper();
+          n.bassShaper.curve = driveCurve(st.drive);
+          n.bassShaper.oversample = "2x";
+          n.bassShaper.connect(n.bassFilter);
+          n.bassIn = n.bassShaper;
+        }
       }
 
       // Pad tone shaping
@@ -526,6 +624,17 @@
       applyMixer(true);
     }
 
+    // Soft-clip curve for the bass (cached per drive amount; output kept near the clean level).
+    const driveCache = {};
+    function driveCurve(k) {
+      if (!driveCache[k]) {
+        const n = 2048, c = new Float32Array(n);
+        for (let i = 0; i < n; i++) c[i] = Math.tanh(k * ((i / (n - 1)) * 2 - 1)) * 0.35;
+        driveCache[k] = c;
+      }
+      return driveCache[k];
+    }
+
     function teardownGraph() {
       const old = g;
       g = null;
@@ -555,19 +664,21 @@
       V.mute = null; V.bars = 0; V.skip = 1;   // first phrase always plays full
     }
 
-    function pickScene() {
+    function pickScene(key) {
+      const list = VAR_SCENES[key];
       let total = 0;
-      VAR_SCENES.forEach((sc) => { total += sc.w; });
+      list.forEach((sc) => { total += sc.w; });
       let r = Math.random() * total;
-      for (const sc of VAR_SCENES) {
+      for (const sc of list) {
         r -= sc.w;
         if (r < 0) return sc.mute;
       }
-      return VAR_SCENES[0].mute;
+      return list[0].mute;
     }
 
     function updateVariation() {
-      const chance = styleKey === "synthwave" ? (VAR_LEVELS[S.sel.variation] || 0) : 0;
+      const st = STYLES[styleKey];
+      const chance = st.scenes ? (VAR_LEVELS[S.sel.variation] || 0) : 0;
       if (chance === 0) {
         if (V.mute) resetVariation();
         return;
@@ -579,7 +690,7 @@
       if (!V.mute && chordIdx % phraseLen === 0) {
         if (V.skip > 0) V.skip--;
         else if (Math.random() < chance) {
-          V.mute = pickScene();
+          V.mute = pickScene(st.scenes);
           V.bars = VAR_BARS[Math.floor(Math.random() * VAR_BARS.length)];
         }
       }
@@ -591,11 +702,23 @@
     // Always advances the chord (the bass and arp depend on it); the pad sound is optional.
     function playChord(t, withPad) {
       const chords = PROGRESSIONS[S.prog].chords;
-      const chord = chords[chordIdx % chords.length];
+      const pos = chordIdx % chords.length;
+      const chord = chords[pos];
       chordIdx++;
       currentChord = chord;
       arpK = 0;
       arpDir = Math.random() < 0.5 ? "up" : "down";   // used by the Random arp pattern for this bar
+
+      // Bass filter: slow sweep lo -> hi -> lo across the phrase, one bar's slice at a time.
+      const sweep = STYLES[styleKey].bassSweep;
+      if (sweep && g.bassFilter) {
+        const tri = (x) => 1 - Math.abs(2 * x - 1);
+        const fr = (x) => sweep[0] * Math.pow(sweep[1] / sweep[0], tri(x));
+        const bf = g.bassFilter.frequency;
+        bf.cancelScheduledValues(t);
+        bf.setValueAtTime(fr(pos / chords.length), t);
+        bf.exponentialRampToValueAtTime(fr((pos + 1) / chords.length), t + 16 * stepDur());
+      }
       if (!withPad) return;
 
       const shape = S.sel.padShape;
@@ -620,13 +743,14 @@
       });
     }
 
-    // Bass: pulsing sawtooth on the chord root, one octave below the pad's lowest note.
-    function playBass(t, s) {
+    // Bass: sawtooth on the chord root, one octave below the pad's lowest note.
+    // p comes from BASS_PATTERNS: { len, acc, up }.
+    function playBass(t, p) {
       const sd = stepDur();
       let f = noteFreq(currentChord[0]) / 2;
-      if ((s / 2) % 4 === 3) f *= 2;                   // octave pop on the last 8th of each beat group
-      const dur = 2 * sd * 0.85;
-      const peak = s % 4 === 0 ? 0.34 : 0.26, atk = 0.008;
+      if (p.up) f *= 2;
+      const dur = p.len * sd * 0.85;
+      const peak = p.acc ? 0.34 : 0.26, atk = 0.008;
       const o = ctx.createOscillator();
       const gn = ctx.createGain();
       o.type = "sawtooth";
@@ -635,7 +759,7 @@
       gn.gain.linearRampToValueAtTime(peak, t + atk);
       gn.gain.setTargetAtTime(peak * 0.55, t + atk, 0.08);
       gn.gain.setTargetAtTime(0, t + dur, 0.04);
-      o.connect(gn).connect(g.bassFilter);
+      o.connect(gn).connect(g.bassIn);
       o.start(t);
       o.stop(t + dur + 0.3);
     }
@@ -668,7 +792,8 @@
       const pat = S.sel.arpPattern === "random" ? arpDir : S.sel.arpPattern;
       const f = pool[arpIndex(pat, pool.length, arpK++)];
       const shape = S.sel.arpShape;
-      const dur = stepDur() * 0.8;
+      const every = STYLES[styleKey].arpEvery || 1;
+      const dur = every * stepDur() * 0.8;
       const peak = 0.13 * SHAPE_LEVEL[shape] * (s % 4 === 0 ? 1 : 0.75);
       const o = ctx.createOscillator();
       const gn = ctx.createGain();
@@ -750,6 +875,44 @@
       noiseHit(t, g.hatHP, 0.16 * vel, 0.04);
     }
 
+    // Harder kick: faster pitch drop, longer body, and a tiny click on top.
+    function kickHard(t, vel) {
+      const o = ctx.createOscillator();
+      const gn = ctx.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(190, t);
+      o.frequency.exponentialRampToValueAtTime(40, t + 0.09);
+      gn.gain.setValueAtTime(0.0001, t);
+      gn.gain.exponentialRampToValueAtTime(0.7 * vel, t + 0.003);
+      gn.gain.exponentialRampToValueAtTime(0.001, t + 0.5);
+      o.connect(gn).connect(g.drums);
+      o.start(t);
+      o.stop(t + 0.55);
+      noiseHit(t, g.hatHP, 0.1 * vel, 0.012);
+    }
+
+    // Gated snare: noise held at level, then cut off sharply (the reverb send adds the tail).
+    function gatedSnare(t, vel) {
+      const s = ctx.createBufferSource();
+      const gn = ctx.createGain();
+      s.buffer = noiseBuf;
+      gn.gain.setValueAtTime(0.55 * vel, t);
+      gn.gain.linearRampToValueAtTime(0.38 * vel, t + 0.16);
+      gn.gain.linearRampToValueAtTime(0.0001, t + 0.19);
+      s.connect(gn).connect(g.snareBP);
+      s.start(t, Math.random() * 0.8);
+      s.stop(t + 0.2);
+      const o = ctx.createOscillator();
+      const bg = ctx.createGain();
+      o.type = "triangle";
+      o.frequency.value = 175;
+      bg.gain.setValueAtTime(0.3 * vel, t);
+      bg.gain.exponentialRampToValueAtTime(0.001, t + 0.11);
+      o.connect(bg).connect(g.drums);
+      o.start(t);
+      o.stop(t + 0.12);
+    }
+
     // ---------------------------------------------------------------
     // Scheduler (16 steps per bar, 4/4)
     // ---------------------------------------------------------------
@@ -775,7 +938,19 @@
       else if (s % 4 === 0) hat(jt, 0.5);
       else if (Math.random() < 0.6) hat(jt, rand(0.15, 0.25));
     }
-    const DRUMS = { chill: drumsChill, synth: drumsSynth };
+    // Darksynth: heavy kick on 1 and 3 (plus occasional extras), gated snare on 2 and 4, tight hats.
+    function drumsDark(s, jt) {
+      if (s === 0 || s === 8) kickHard(jt, 1);
+      else if (s === 3 && Math.random() < 0.2) kickHard(jt, 0.7);
+      else if ((s === 6 || s === 10 || s === 14) && Math.random() < 0.3) kickHard(jt, 0.8);
+
+      if (s === 4 || s === 12) gatedSnare(jt, rand(0.9, 1));
+
+      if (s % 4 === 2) hat(jt, rand(0.8, 1));
+      else if (s % 4 === 0) hat(jt, 0.45);
+      else if (Math.random() < 0.7) hat(jt, rand(0.15, 0.3));
+    }
+    const DRUMS = { chill: drumsChill, synth: drumsSynth, dark: drumsDark };
 
     function scheduleStep(s, t) {
       const st = STYLES[styleKey];
@@ -791,8 +966,9 @@
       if (st.lead === "melody") {
         if (s % 2 === 0 && Math.random() < MELODY_DENSITY) playMelody(t);
       } else {
-        if (s % 2 === 0 && !muted("bass")) playBass(t, s);
-        if (!muted("arp")) playArp(t, s);
+        const bp = BASS_PATTERNS[S.sel.bassPattern || st.bassPattern](s);
+        if (bp && !muted("bass")) playBass(t, bp);
+        if (s % (st.arpEvery || 1) === 0 && !muted("arp")) playArp(t, s);
       }
     }
 
