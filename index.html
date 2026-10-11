@@ -154,22 +154,13 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261008-1515</h2>
+    <h2>261011-1937</h2>
 
     <button id="playBtn">Start Beat</button>
 
     <div class="control-group">
       <label for="styleSelect">Style</label>
       <select id="styleSelect"></select>
-    </div>
-
-    <div class="control-group">
-      <label for="intensitySelect">Intensity</label>
-      <select id="intensitySelect">
-        <option value="study">Standard (Read / Study)</option>
-        <option value="calm">Calm (Muted Drums, Soft Synth)</option>
-        <option value="sleep">Sleep (No Drums, Ambient)</option>
-      </select>
     </div>
 
     <div class="control-group" id="progGroup">
@@ -327,25 +318,32 @@
         { id: "padShape", label: "Pad", def: "super",
           options: [["super", "Supersaw (Wide/Lush)"], ["sawtooth", SHAPE_LABELS.sawtooth], ["softtri", SHAPE_LABELS.softtri]] },
         { id: "arpPattern", label: "Pattern", def: "up",
-          options: [["up", "Up"], ["updown", "Up-Down"], ["down", "Down"], ["random", "Random"]] },
+          options: [["up", "Up"], ["updown", "Up-Down"], ["down", "Down"], ["random", "Random (Up/Down Per Bar)"]] },
         { id: "arpShape", label: "Lead", def: "sawtooth",
-          options: shapeOpts(["sawtooth", "square", "softtri", "triangle", "sine"]) }
+          options: shapeOpts(["sawtooth", "square", "softtri", "triangle", "sine"]) },
+        { id: "variation", label: "Variation", def: "med",
+          options: [["off", "Off (Steady Loop)"], ["low", "Rare (Auto Mute)"], ["med", "Occasional (Auto Mute)"], ["high", "Frequent (Auto Mute)"]] }
       ]
     };
 
-    // Intensity: master filter cutoff, drum level, melody density. Applies to every style.
-    const INTENSITY = {
-      study: { cutoff: 2500, drums: 1,    melody: 0.55 },
-      calm:  { cutoff: 1200, drums: 0.45, melody: 0.4  },
-      sleep: { cutoff: 450,  drums: 0,    melody: 0.25 }
-    };
+    // Fixed tone settings (formerly the Intensity "Standard" preset).
+    const CUTOFF = 2500;          // master lowpass cutoff (Hz), multiplied by the style's cutoffMul
+    const MELODY_DENSITY = 0.55;  // chance of a melody note on each eighth (Chillwave)
 
     // Waveform loudness compensation so shapes sit at similar levels.
-    Object.assign(INTENSITY.study, { arpEvery: 1, pulse: true });   // arp note spacing (steps), pulsing bass
-    Object.assign(INTENSITY.calm,  { arpEvery: 2, pulse: true });
-    Object.assign(INTENSITY.sleep, { arpEvery: 4, pulse: false });
-
     const SHAPE_LEVEL = { sine: 1.2, softtri: 1.1, triangle: 1, sawtooth: 0.4, square: 0.35, super: 0.2 };
+
+    // Variation (Synthwave): occasionally mute some channels for a few bars.
+    // Decisions are made only at the start of a phrase (one pass through the progression).
+    const VAR_LEVELS = { off: 0, low: 0.08, med: 0.15, high: 0.30 };   // chance per eligible phrase that a scene starts
+    const VAR_BARS = [2, 4];      // possible scene lengths, in bars
+    const VAR_SCENES = [          // channels muted in each scene, with relative weights
+      { mute: ["drums"],         w: 3 },
+      { mute: ["arp"],           w: 3 },
+      { mute: ["pad"],           w: 2 },
+      { mute: ["drums", "bass"], w: 1 },
+      { mute: ["pad", "arp"],    w: 1 }
+    ];
 
     const LOOKAHEAD = 0.2;     // seconds scheduled ahead of the audio clock
     const TICK_MS = 25;        // scheduler wake-up interval
@@ -357,12 +355,14 @@
     let playing = false;
     let step = 0, nextTime = 0, chordIdx = 0;
     let currentChord = null, lastMelodyNote = null;
-    let arpK = 0, irBuf = null;
+    let arpK = 0, arpDir = "up", irBuf = null;
+
+    // Variation state: mute = array of muted channel ids (or null), bars = bars left in the scene,
+    // skip = number of phrase-start decisions to pass on (first phrase and cooldown after a scene).
+    const V = { mute: null, bars: 0, skip: 1 };
 
     // Per-style settings (tempo, levels, pulldowns, progression), remembered separately.
     let styleKey = Object.keys(STYLES)[0];
-    let intensityKey = "study";
-    let inten = INTENSITY.study;
     const store = {};
     let S = null;                          // settings of the current style
 
@@ -474,7 +474,7 @@
       n.comp.ratio.value = 6;
       n.filter = ctx.createBiquadFilter();
       n.filter.type = "lowpass";
-      n.filter.frequency.value = inten.cutoff * st.cutoffMul;
+      n.filter.frequency.value = CUTOFF * st.cutoffMul;
       n.filter.connect(n.comp).connect(n.out).connect(ctx.destination);
 
       n.drums = ctx.createGain();  n.drums.connect(n.filter);
@@ -540,21 +540,63 @@
       STYLES[styleKey].channels.forEach((c) => {
         const node = g[c.id];
         if (!node) return;
-        const scale = c.id === "drums" ? inten.drums : 1;
-        node.gain.setTargetAtTime(dbToGain(S.vol[c.id]) * scale, t, tc);
+        node.gain.setTargetAtTime(dbToGain(S.vol[c.id]), t, tc);
       });
-      g.filter.frequency.setTargetAtTime(inten.cutoff * STYLES[styleKey].cutoffMul, t, instant ? 0.001 : 0.15);
+      g.filter.frequency.setTargetAtTime(CUTOFF * STYLES[styleKey].cutoffMul, t, instant ? 0.001 : 0.15);
+    }
+
+    // ---------------------------------------------------------------
+    // Variation: decided once per bar (step 0), by counting bars, never by wall-clock time.
+    // Muting is done by skipping notes in the scheduler, not by touching gain nodes.
+    // ---------------------------------------------------------------
+    const muted = (ch) => V.mute !== null && V.mute.indexOf(ch) !== -1;
+
+    function resetVariation() {
+      V.mute = null; V.bars = 0; V.skip = 1;   // first phrase always plays full
+    }
+
+    function pickScene() {
+      let total = 0;
+      VAR_SCENES.forEach((sc) => { total += sc.w; });
+      let r = Math.random() * total;
+      for (const sc of VAR_SCENES) {
+        r -= sc.w;
+        if (r < 0) return sc.mute;
+      }
+      return VAR_SCENES[0].mute;
+    }
+
+    function updateVariation() {
+      const chance = styleKey === "synthwave" ? (VAR_LEVELS[S.sel.variation] || 0) : 0;
+      if (chance === 0) {
+        if (V.mute) resetVariation();
+        return;
+      }
+      // Count down an active scene; when it ends, sit out the next phrase-start decision.
+      if (V.mute && --V.bars <= 0) { V.mute = null; V.skip = 1; }
+
+      const phraseLen = PROGRESSIONS[S.prog].chords.length;
+      if (!V.mute && chordIdx % phraseLen === 0) {
+        if (V.skip > 0) V.skip--;
+        else if (Math.random() < chance) {
+          V.mute = pickScene();
+          V.bars = VAR_BARS[Math.floor(Math.random() * VAR_BARS.length)];
+        }
+      }
     }
 
     // ---------------------------------------------------------------
     // Voices
     // ---------------------------------------------------------------
-    function playChord(t) {
+    // Always advances the chord (the bass and arp depend on it); the pad sound is optional.
+    function playChord(t, withPad) {
       const chords = PROGRESSIONS[S.prog].chords;
       const chord = chords[chordIdx % chords.length];
       chordIdx++;
       currentChord = chord;
       arpK = 0;
+      arpDir = Math.random() < 0.5 ? "up" : "down";   // used by the Random arp pattern for this bar
+      if (!withPad) return;
 
       const shape = S.sel.padShape;
       const dur = 16 * stepDur();
@@ -578,18 +620,13 @@
       });
     }
 
-    // Bass: sawtooth on the chord root, one octave below the pad's lowest note.
+    // Bass: pulsing sawtooth on the chord root, one octave below the pad's lowest note.
     function playBass(t, s) {
       const sd = stepDur();
       let f = noteFreq(currentChord[0]) / 2;
-      let dur, peak, atk;
-      if (inten.pulse) {
-        dur = 2 * sd * 0.85;
-        if ((s / 2) % 4 === 3) f *= 2;                 // octave pop on the last 8th of each beat group
-        peak = s % 4 === 0 ? 0.34 : 0.26; atk = 0.008;
-      } else {
-        dur = 16 * sd; peak = 0.3; atk = 0.08;         // sleep: one long note per bar
-      }
+      if ((s / 2) % 4 === 3) f *= 2;                   // octave pop on the last 8th of each beat group
+      const dur = 2 * sd * 0.85;
+      const peak = s % 4 === 0 ? 0.34 : 0.26, atk = 0.008;
       const o = ctx.createOscillator();
       const gn = ctx.createGain();
       o.type = "sawtooth";
@@ -628,9 +665,10 @@
     function playArp(t, s) {
       if (!currentChord) return;
       const pool = arpPool(currentChord);
-      const f = pool[arpIndex(S.sel.arpPattern, pool.length, arpK++)];
+      const pat = S.sel.arpPattern === "random" ? arpDir : S.sel.arpPattern;
+      const f = pool[arpIndex(pat, pool.length, arpK++)];
       const shape = S.sel.arpShape;
-      const dur = inten.arpEvery * stepDur() * 0.8;
+      const dur = stepDur() * 0.8;
       const peak = 0.13 * SHAPE_LEVEL[shape] * (s % 4 === 0 ? 1 : 0.75);
       const o = ctx.createOscillator();
       const gn = ctx.createGain();
@@ -743,15 +781,18 @@
       const st = STYLES[styleKey];
       if (s % 2 === 1) t += stepDur() * st.swing;          // swing the off-16ths
 
-      if (s === 0) playChord(t);
+      if (s === 0) {
+        updateVariation();
+        playChord(t, !muted("pad"));
+      }
 
-      if (inten.drums > 0) DRUMS[st.drums](s, t + rand(-st.jitter, st.jitter));
+      if (!muted("drums")) DRUMS[st.drums](s, t + rand(-st.jitter, st.jitter));
 
       if (st.lead === "melody") {
-        if (s % 2 === 0 && Math.random() < inten.melody) playMelody(t);
+        if (s % 2 === 0 && Math.random() < MELODY_DENSITY) playMelody(t);
       } else {
-        if (inten.pulse ? s % 2 === 0 : s === 0) playBass(t, s);
-        if (s % inten.arpEvery === 0) playArp(t, s);
+        if (s % 2 === 0 && !muted("bass")) playBass(t, s);
+        if (!muted("arp")) playArp(t, s);
       }
     }
 
@@ -804,7 +845,6 @@
         if (raw) {
           const o = JSON.parse(raw);
           if (STYLES[o.style]) styleKey = o.style;
-          if (INTENSITY[o.intensity]) intensityKey = o.intensity;
           Object.keys(STYLES).forEach((k) => mergeState(k, (o.store || {})[k]));
         } else {
           // One-time migration from the old slider-based settings.
@@ -815,12 +855,10 @@
               vol: { master: old.masterVol, drums: old.drumsVol, pad: old.padVol, melody: old.melodyVol },
               sel: { padShape: old.padShape, melodyShape: old.melodyShape }
             });
-            if (INTENSITY[old.modeSelect]) intensityKey = old.modeSelect;
           }
         }
       } catch (e) {}
       S = store[styleKey];
-      inten = INTENSITY[intensityKey];
     }
 
     let saveTimer = null;
@@ -828,7 +866,7 @@
       clearTimeout(saveTimer);
       saveTimer = setTimeout(() => {
         try {
-          localStorage.setItem(SAVE_KEY, JSON.stringify({ style: styleKey, intensity: intensityKey, store }));
+          localStorage.setItem(SAVE_KEY, JSON.stringify({ style: styleKey, store }));
         } catch (e) {}
       }, 300);
     }
@@ -913,7 +951,11 @@
           const o = el("option"); o.value = v; o.textContent = text; sel.appendChild(o);
         });
         sel.value = S.sel[s.id];
-        sel.addEventListener("change", () => { S.sel[s.id] = sel.value; saveSettings(); });
+        sel.addEventListener("change", () => {
+          S.sel[s.id] = sel.value;
+          if (s.id === "variation" && sel.value === "off") resetVariation();   // Off restores everything immediately
+          saveSettings();
+        });
         row.append(lbl, sel);
         box.appendChild(row);
       });
@@ -933,6 +975,7 @@
       styleKey = key;
       S = store[key];
       chordIdx = 0; currentChord = null; lastMelodyNote = null;
+      resetVariation();
       buildControls();
       fillProgressions();
       saveSettings();
@@ -950,6 +993,7 @@
       silentEl.play().catch(() => {});
       buildGraph();
       step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
+      resetVariation();
       nextTime = ctx.currentTime + 0.1;
       playing = true;
       timer.start();
@@ -964,6 +1008,7 @@
       timer.stop();
       teardownGraph();
       if (silentEl) silentEl.pause();
+      resetVariation();
       $("playBtn").textContent = "Start Beat";
       $("playBtn").classList.remove("playing");
       if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
@@ -991,15 +1036,9 @@
     styleSelect.value = styleKey;
     styleSelect.addEventListener("change", (e) => switchStyle(e.target.value));
 
-    $("intensitySelect").value = intensityKey;
-    $("intensitySelect").addEventListener("change", (e) => {
-      intensityKey = e.target.value;
-      inten = INTENSITY[intensityKey];
-      applyMixer();
-      saveSettings();
+    $("progSelect").addEventListener("change", (e) => {
+      S.prog = e.target.value; chordIdx = 0; resetVariation(); saveSettings();
     });
-
-    $("progSelect").addEventListener("change", (e) => { S.prog = e.target.value; chordIdx = 0; saveSettings(); });
 
     buildControls();
     fillProgressions();
