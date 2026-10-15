@@ -162,7 +162,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261015-0946</h2>
+    <h2>261015-1424</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -467,7 +467,7 @@
     const V = { mute: null, bars: 0, skip: 1 };
     
     const RADIO_SEC = [210, 390];
-    const RADIO_STEP_BARS = [4, 8];   // bars between each channel entering (intro) or dropping (outro)
+    const RADIO_STEP_CHOICES = [4, 8, 8];   // bars between each channel entering (intro) or dropping (outro); one is picked per channel
 	const R = { on: false, base: null, n: 0, bar: 0, phase: "body", skip: false, mute: null,
 	            intro: [], out: [], introBars: 0, ib: 0, gapBar: 0 };
 	let refreshers = [], selEls = {};
@@ -729,7 +729,7 @@
 	  const ids = STYLES[styleKey].channels.map((c) => c.id);
 	  const P = PROGRESSIONS[S.prog].chords.length;
 	  const shuf = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-	  const sched = (ord) => { let at = 0; const list = ord.map((ch) => { const e = { ch, at }; at += RADIO_STEP_BARS[0] + Math.floor(Math.random() * (RADIO_STEP_BARS[1] - RADIO_STEP_BARS[0] + 1)); return e; }); return { list, end: at }; };
+	  const sched = (ord) => { let at = 0; const list = ord.map((ch) => { const e = { ch, at }; at += RADIO_STEP_CHOICES[Math.floor(Math.random() * RADIO_STEP_CHOICES.length)]; return e; }); return { list, end: at }; };
 
 	  const lastIn = Math.random() < 0.5 ? "pad" : "drums";      // last to enter
 	  const inOrd = shuf(ids.filter((c) => c !== lastIn));
