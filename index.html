@@ -149,14 +149,28 @@
       font-size: 0.95rem;
       font-variant-numeric: tabular-nums;
     }
+
+    .radiorow { display: flex; gap: 8px; }
+	.radiorow button { flex: 1; }
+	.radiorow [hidden] { display: none; }
+	button.alt { background: var(--bg); color: var(--accent); border: 1px solid var(--border); }
+	button.alt.on { background: var(--accent); color: #1a1a1a; }
+	#radioInfo { font-size: 0.75rem; color: var(--muted); text-align: center; min-height: 1em; }
+	
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261011-1946</h2>
+    <h2>261015-0946</h2>
 
     <button id="playBtn">Start Beat</button>
+    
+    <div class="radiorow">
+	  <button id="radioBtn" class="alt">Radio: Off</button>
+	  <button id="nextBtn" class="alt" hidden>Next Track ▸</button>
+	</div>
+	<div id="radioInfo"></div>
 
     <div class="control-group">
       <label for="styleSelect">Style</label>
@@ -333,9 +347,11 @@
         ],
         selects: [                          // pulldowns under the mixer
           { id: "padShape",    label: "Pad",    def: "triangle",
-            options: shapeOpts(["triangle", "softtri", "sine", "sawtooth", "square"]) },
+            options: shapeOpts(["triangle", "softtri", "sine", "sawtooth", "square"]),
+            radio: ["triangle", "softtri", "sine"] },
           { id: "melodyShape", label: "Melody", def: "sine",
-            options: shapeOpts(["sine", "softtri", "triangle", "sawtooth", "square"]) }
+            options: shapeOpts(["sine", "softtri", "triangle", "sawtooth", "square"]),
+            radio: ["sine", "softtri", "triangle"] }
         ]
       }
     };
@@ -449,6 +465,12 @@
     // Variation state: mute = array of muted channel ids (or null), bars = bars left in the scene,
     // skip = number of phrase-start decisions to pass on (first phrase and cooldown after a scene).
     const V = { mute: null, bars: 0, skip: 1 };
+    
+    const RADIO_SEC = [210, 390];
+    const RADIO_STEP_BARS = [4, 8];   // bars between each channel entering (intro) or dropping (outro)
+	const R = { on: false, base: null, n: 0, bar: 0, phase: "body", skip: false, mute: null,
+	            intro: [], out: [], introBars: 0, ib: 0, gapBar: 0 };
+	let refreshers = [], selEls = {};
 
     // Per-style settings (tempo, levels, pulldowns, progression), remembered separately.
     let styleKey = Object.keys(STYLES)[0];
@@ -658,7 +680,7 @@
     // Variation: decided once per bar (step 0), by counting bars, never by wall-clock time.
     // Muting is done by skipping notes in the scheduler, not by touching gain nodes.
     // ---------------------------------------------------------------
-    const muted = (ch) => V.mute !== null && V.mute.indexOf(ch) !== -1;
+    const muted = (ch) => { const m = (R.on && R.mute) || V.mute; return !!m && m.indexOf(ch) !== -1; };
 
     function resetVariation() {
       V.mute = null; V.bars = 0; V.skip = 1;   // first phrase always plays full
@@ -695,6 +717,106 @@
         }
       }
     }
+
+	const progName = (k) => (PROGRESSIONS[k].label.match(/\(([^)]+)\)/) || [0, k])[1];
+
+	function radioClone(base) {      // vol is shared; bpm/sel/prog are the radio's own copy
+	  R.base = base;
+	  return { bpm: base.bpm, vol: base.vol, sel: Object.assign({}, base.sel), prog: base.prog };
+	}
+
+	function radioPlan() {
+	  const ids = STYLES[styleKey].channels.map((c) => c.id);
+	  const P = PROGRESSIONS[S.prog].chords.length;
+	  const shuf = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+	  const sched = (ord) => { let at = 0; const list = ord.map((ch) => { const e = { ch, at }; at += RADIO_STEP_BARS[0] + Math.floor(Math.random() * (RADIO_STEP_BARS[1] - RADIO_STEP_BARS[0] + 1)); return e; }); return { list, end: at }; };
+
+	  const lastIn = Math.random() < 0.5 ? "pad" : "drums";      // last to enter
+	  const inOrd = shuf(ids.filter((c) => c !== lastIn));
+	  if (inOrd[0] === "drums") { const j = inOrd.length - 1; [inOrd[0], inOrd[j]] = [inOrd[j], inOrd[0]]; }
+	  inOrd.push(lastIn);
+
+	  const outOrd = shuf(ids), L = outOrd.length - 1;          // drums never the last one left
+	  if (outOrd[L] === "drums") { const j = Math.floor(Math.random() * L); [outOrd[j], outOrd[L]] = [outOrd[L], outOrd[j]]; }
+
+	  const si = sched(inOrd), so = sched(outOrd), outBars = so.list[L].at;
+	  R.intro = si.list; R.introBars = si.end; R.out = so.list;
+	  const total = rand(RADIO_SEC[0], RADIO_SEC[1]) / (16 * stepDur());
+	  R.ib = Math.max(Math.ceil((R.introBars + P) / P) * P, Math.round((total - outBars - 1) / P) * P);
+	  R.gapBar = R.ib + outBars;                                 // the silent bar
+	  R.bar = 0;
+	}
+
+	function radioNewTrack(first) {
+	  const st = STYLES[styleKey];
+	  if (!first) {
+	    const ps = st.progs.filter((p) => p !== S.prog);
+	    if (ps.length) S.prog = ps[Math.floor(Math.random() * ps.length)];
+	    const up = Math.random() < clamp(0.5 + (st.bpm.def - S.bpm) / (st.bpm.max - st.bpm.min), 0.1, 0.9);
+	    S.bpm = clamp(S.bpm + (up ? 1 : -1) * Math.round(rand(2, 5)), st.bpm.min, st.bpm.max);
+	    st.selects.forEach((s) => {
+	      if (s.id === "variation") return;
+	      const pool = (s.radio || s.options.map((o) => o[0])).filter((v) => v !== S.sel[s.id]);
+	      if (pool.length) S.sel[s.id] = pool[Math.floor(Math.random() * pool.length)];
+	    });
+	    if (g) g.delay.delayTime.setTargetAtTime(45 / S.bpm, ctx.currentTime, 0.05);
+	  }
+	  R.n++; chordIdx = 0;
+	  radioPlan();
+	  refreshers.forEach((f) => f());
+	  Object.keys(selEls).forEach((id) => { selEls[id].value = S.sel[id]; });
+	  $("progSelect").value = S.prog;
+	  if ("mediaSession" in navigator) {
+	    try {
+	      const old = navigator.mediaSession.metadata;
+	      navigator.mediaSession.metadata = new MediaMetadata({
+	        title: STYLES[styleKey].label + " · " + progName(S.prog),
+	        artist: S.bpm + " BPM · Radio",
+	        artwork: old ? old.artwork : []
+	      });
+	    } catch (e) {}
+	  }
+	}
+
+	function radioInfo() {
+	  $("radioInfo").textContent = R.on ? (playing ? "Track " + R.n + " · " + R.phase : "Radio ready") : "";
+	}
+
+	// Called at every bar line (step 0) while Radio is on.
+	function radioBar() {
+	  if (R.skip) { R.skip = false; if (R.bar < R.gapBar) R.bar = R.gapBar; }
+	  if (R.bar > R.gapBar) radioNewTrack(false);
+	  const b = R.bar++;
+	  chordIdx = b;
+	  if (b < R.introBars) { R.phase = "intro"; R.mute = R.intro.filter((e) => e.at > b).map((e) => e.ch); }
+	  else if (b >= R.ib) { R.phase = b < R.gapBar ? "outro" : "gap"; R.mute = R.out.filter((e) => e.at <= b - R.ib).map((e) => e.ch); }
+	  else { R.phase = "body"; R.mute = null; }
+	  if (R.mute) resetVariation(); else updateVariation();
+	  radioInfo();
+	}
+
+	function setRadio(on) {
+	  if (on === R.on) return;
+	  R.on = on;
+	  R.skip = false;
+	  if (on) {
+	    S = radioClone(S); R.n = 0;
+	    if (playing) {                               // join mid-beat: new track, skipping its intro
+	      radioNewTrack(true);
+	      R.bar = Math.ceil(R.introBars / PROGRESSIONS[S.prog].chords.length) * PROGRESSIONS[S.prog].chords.length;
+	    }
+	  } else {
+	    Object.assign(R.base, { bpm: S.bpm, prog: S.prog, sel: Object.assign({}, S.sel) });
+	    S = R.base; R.mute = null; resetVariation(); saveSettings();
+	  }
+	  $("radioBtn").textContent = "Radio: " + (on ? "On" : "Off");
+	  $("radioBtn").classList.toggle("on", on);
+	  $("nextBtn").hidden = !on;
+	  radioInfo();
+	  if ("mediaSession" in navigator) {
+	    try { navigator.mediaSession.setActionHandler("nexttrack", on ? () => { if (playing) R.skip = true; } : null); } catch (e) {}
+	  }
+	}
 
     // ---------------------------------------------------------------
     // Voices
@@ -957,14 +1079,14 @@
       if (s % 2 === 1) t += stepDur() * st.swing;          // swing the off-16ths
 
       if (s === 0) {
-        updateVariation();
-        playChord(t, !muted("pad"));
-      }
+	    if (R.on) radioBar(); else updateVariation();
+	    playChord(t, !muted("pad"));
+	  }
 
       if (!muted("drums")) DRUMS[st.drums](s, t + rand(-st.jitter, st.jitter));
 
       if (st.lead === "melody") {
-        if (s % 2 === 0 && Math.random() < MELODY_DENSITY) playMelody(t);
+        if (s % 2 === 0 && !muted("melody") && Math.random() < MELODY_DENSITY) playMelody(t);
       } else {
         const bp = BASS_PATTERNS[S.sel.bassPattern || st.bassPattern](s);
         if (bp && !muted("bass")) playBass(t, bp);
@@ -1080,6 +1202,7 @@
         dec.disabled = get() <= min;
         inc.disabled = get() >= max;
       };
+      refreshers.push(show);
       const bump = (d) => () => {
         const v = clamp(get() + d, min, max);
         if (v === get()) return;
@@ -1096,6 +1219,7 @@
     const fmtDb = (v) => (v <= VOL_MIN ? "Off" : (v > 0 ? "+" : "") + v + " dB");
 
     function buildControls() {
+      refreshers = []; selEls = {};
       const st = STYLES[styleKey], box = $("controls");
       box.textContent = "";
 
@@ -1122,6 +1246,7 @@
         const row = el("div", "row sel");
         const lbl = el("div", "lbl"); lbl.textContent = s.label;
         const sel = el("select");
+        selEls[s.id] = sel;
         sel.setAttribute("aria-label", s.label + " sound");
         s.options.forEach(([v, text]) => {
           const o = el("option"); o.value = v; o.textContent = text; sel.appendChild(o);
@@ -1130,6 +1255,7 @@
         sel.addEventListener("change", () => {
           S.sel[s.id] = sel.value;
           if (s.id === "variation" && sel.value === "off") resetVariation();   // Off restores everything immediately
+          if (R.on && s.id === "variation") R.base.sel.variation = sel.value;
           saveSettings();
         });
         row.append(lbl, sel);
@@ -1149,8 +1275,10 @@
 
     function switchStyle(key) {
       styleKey = key;
-      S = store[key];
-      chordIdx = 0; currentChord = null; lastMelodyNote = null;
+	  S = store[key];
+	  if (R.on) S = radioClone(S);
+	  radioInfo();
+	  chordIdx = 0; currentChord = null; lastMelodyNote = null;
       resetVariation();
       buildControls();
       fillProgressions();
@@ -1170,6 +1298,7 @@
       buildGraph();
       step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
       resetVariation();
+      if (R.on) { R.n = 0; R.skip = false; radioNewTrack(true); }
       nextTime = ctx.currentTime + 0.1;
       playing = true;
       timer.start();
@@ -1185,6 +1314,7 @@
       teardownGraph();
       if (silentEl) silentEl.pause();
       resetVariation();
+      radioInfo();
       $("playBtn").textContent = "Start Beat";
       $("playBtn").classList.remove("playing");
       if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
@@ -1199,6 +1329,8 @@
     }
 
     $("playBtn").addEventListener("click", () => (playing ? stopBeat() : startBeat()));
+	$("radioBtn").addEventListener("click", () => setRadio(!R.on));
+	$("nextBtn").addEventListener("click", () => { if (R.on && playing) R.skip = true; });
 
     // ---------------------------------------------------------------
     // Init
