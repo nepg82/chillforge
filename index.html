@@ -374,7 +374,9 @@
         { id: "padShape", label: "Pad", def: "super",
           options: [["super", "Supersaw (Wide/Lush)"], ["sawtooth", SHAPE_LABELS.sawtooth], ["softtri", SHAPE_LABELS.softtri]] },
         { id: "arpPattern", label: "Pattern", def: "up",
-          options: [["up", "Up"], ["updown", "Up-Down"], ["down", "Down"], ["random", "Random (Up/Down Per Bar)"]] },
+          options: [["up", "Up"], ["updown", "Up-Down"], ["down", "Down"],
+          ["wander", "Wander (Random Walk)"], ["scatter", "Scatter (Fully Random)"]],
+          radio: ["up", "updown", "down", "wander"] },
         { id: "arpShape", label: "Lead", def: "sawtooth",
           options: shapeOpts(["sawtooth", "square", "softtri", "triangle", "sine"]) },
         { id: "variation", label: "Variation", def: "med",
@@ -406,7 +408,9 @@
         { id: "padShape", label: "Pad", def: "super",
           options: [["super", "Supersaw (Wide/Lush)"], ["sawtooth", SHAPE_LABELS.sawtooth], ["softtri", SHAPE_LABELS.softtri]] },
         { id: "arpPattern", label: "Pattern", def: "updown",
-          options: [["up", "Up"], ["updown", "Up-Down"], ["down", "Down"], ["random", "Random (Up/Down Per Bar)"]] },
+          options: [["up", "Up"], ["updown", "Up-Down"], ["down", "Down"],
+          ["wander", "Wander (Random Walk)"], ["scatter", "Scatter (Fully Random)"]],
+          radio: ["up", "updown", "down", "wander"] },
         { id: "arpShape", label: "Lead", def: "sawtooth",
           options: shapeOpts(["sawtooth", "square", "softtri", "triangle", "sine"]) },
         { id: "variation", label: "Variation", def: "med",
@@ -460,7 +464,7 @@
     let playing = false;
     let step = 0, nextTime = 0, chordIdx = 0;
     let currentChord = null, lastMelodyNote = null;
-    let arpK = 0, arpDir = "up", irBuf = null;
+    let arpK = 0, arpFreq = null, irBuf = null;   // arpFreq = last arp note played (Wander/Scatter memory)
 
     // Variation state: mute = array of muted channel ids (or null), bars = bars left in the scene,
     // skip = number of phrase-start decisions to pass on (first phrase and cooldown after a scene).
@@ -829,7 +833,6 @@
       chordIdx++;
       currentChord = chord;
       arpK = 0;
-      arpDir = Math.random() < 0.5 ? "up" : "down";   // used by the Random arp pattern for this bar
 
       // Bass filter: slow sweep lo -> hi -> lo across the phrase, one bar's slice at a time.
       const sweep = STYLES[styleKey].bassSweep;
@@ -903,32 +906,63 @@
       return p;
     }
     function arpIndex(pat, n, k) {
-      if (pat === "random") return Math.floor(Math.random() * n);
-      if (pat === "down") return n - 1 - (k % n);
-      if (pat === "updown") { const p = 2 * n - 2, m = k % p; return m < n ? m : p - m; }
-      return k % n;
-    }
-    function playArp(t, s) {
-      if (!currentChord) return;
-      const pool = arpPool(currentChord);
-      const pat = S.sel.arpPattern === "random" ? arpDir : S.sel.arpPattern;
-      const f = pool[arpIndex(pat, pool.length, arpK++)];
-      const shape = S.sel.arpShape;
-      const every = STYLES[styleKey].arpEvery || 1;
-      const dur = every * stepDur() * 0.8;
-      const peak = 0.13 * SHAPE_LEVEL[shape] * (s % 4 === 0 ? 1 : 0.75);
-      const o = ctx.createOscillator();
-      const gn = ctx.createGain();
-      applyShape(o, shape);
-      o.frequency.value = f;
-      gn.gain.setValueAtTime(0.0001, t);
-      gn.gain.linearRampToValueAtTime(peak, t + 0.004);
-      gn.gain.setTargetAtTime(peak * 0.35, t + 0.004, 0.07);
-      gn.gain.setTargetAtTime(0, t + dur, 0.03);
-      o.connect(gn).connect(g.arp);
-      o.start(t);
-      o.stop(t + dur + 0.25);
-    }
+  if (pat === "down") return n - 1 - (k % n);
+  if (pat === "updown") { const p = 2 * n - 2, m = k % p; return m < n ? m : p - m; }
+  return k % n;
+}
+
+	// Wander / Scatter: pick the next pool index based on the last note played.
+	function arpNext(pat, pool) {
+	  const n = pool.length;
+	  let i = -1;                                   // where the previous note sits in this chord's pool
+	  if (arpFreq !== null) {
+	    let best = Infinity;
+	    pool.forEach((f, j) => {
+	      const d = Math.abs(Math.log(f / arpFreq));
+	      if (d < best) { best = d; i = j; }
+	    });
+	  }
+	  if (i < 0) return Math.floor(Math.random() * n);
+	
+	  if (pat === "scatter") {
+	    let j;
+	    do { j = Math.floor(Math.random() * n); } while (j === i && n > 1);
+	    return j;
+	  }
+	
+	  // wander: mostly neighbors, sometimes a repeat, a skip, or a leap
+	  const r = Math.random();
+	  const dist = r < 0.50 ? 1 : r < 0.65 ? 0 : r < 0.90 ? 2 : 3 + Math.floor(Math.random() * 2);
+	  const dir = Math.random() < 0.5 ? 1 : -1;
+	  let j = i + dir * dist;
+	  if (j < 0 || j >= n) j = i - dir * dist;      // bounce off the ends
+	  return clamp(j, 0, n - 1);
+	}
+
+	function playArp(t, s) {
+	  if (!currentChord) return;
+	  const pool = arpPool(currentChord);
+	  const pat = S.sel.arpPattern;
+	  const f = (pat === "wander" || pat === "scatter")
+	    ? pool[arpNext(pat, pool)]
+	    : pool[arpIndex(pat, pool.length, arpK++)];
+	  arpFreq = f;
+	  const shape = S.sel.arpShape;
+	  const every = STYLES[styleKey].arpEvery || 1;
+	  const dur = every * stepDur() * 0.8;
+	  const peak = 0.13 * SHAPE_LEVEL[shape] * (s % 4 === 0 ? 1 : 0.75);
+	  const o = ctx.createOscillator();
+	  const gn = ctx.createGain();
+	  applyShape(o, shape);
+	  o.frequency.value = f;
+	  gn.gain.setValueAtTime(0.0001, t);
+	  gn.gain.linearRampToValueAtTime(peak, t + 0.004);
+	  gn.gain.setTargetAtTime(peak * 0.35, t + 0.004, 0.07);
+	  gn.gain.setTargetAtTime(0, t + dur, 0.03);
+	  o.connect(gn).connect(g.arp);
+	  o.start(t);
+	  o.stop(t + dur + 0.25);
+	}
 
     function playMelody(t) {
       if (!currentChord) return;
@@ -1296,7 +1330,7 @@
       ctx.resume();
       silentEl.play().catch(() => {});
       buildGraph();
-      step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null;
+      step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null; arpFreq = null;
       resetVariation();
       if (R.on) { R.n = 0; R.skip = false; radioNewTrack(true); }
       nextTime = ctx.currentTime + 0.1;
