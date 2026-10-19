@@ -162,7 +162,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261016-1522</h2>
+    <h2>261019-0726</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -456,11 +456,16 @@
 
     const LOOKAHEAD = 0.2;     // seconds scheduled ahead of the audio clock
     const TICK_MS = 25;        // scheduler wake-up interval
+	const USE_STREAM = true;   // false = old behavior (silent WAV + ctx.destination)
+	// Delays between resume attempts after the OS pauses us (e.g. an alarm). Backs off so we
+	// don't grab audio focus back while the alarm is still ringing.
+	const RESUME_DELAYS = [2, 5, 10, 20].map((s) => s * 1000).concat(Array(20).fill(30000));
 
     // ---------------------------------------------------------------
     // State
     // ---------------------------------------------------------------
-    let ctx = null, g = null, noiseBuf = null, timer = null, silentEl = null;
+    let ctx = null, g = null, noiseBuf = null, timer = null, mediaEl = null, streamDest = null;
+	let resumeTimer = null, resumeTries = 0, stableTimer = null;
     let playing = false;
     let step = 0, nextTime = 0, chordIdx = 0;
     let currentChord = null, lastMelodyNote = null;
@@ -471,7 +476,7 @@
     const V = { mute: null, bars: 0, skip: 1 };
     
     const RADIO_SEC = [210, 390];
-    const RADIO_STEP_CHOICES = [4, 8, 8];   // bars between each channel entering (intro) or dropping (outro); one is picked per channel
+    const RADIO_STEP_CHOICES = [4, 4, 8];   // bars between each channel entering (intro) or dropping (outro); one is picked per channel
 	const R = { on: false, base: null, n: 0, bar: 0, phase: "body", skip: false, mute: null,
 	            intro: [], out: [], introBars: 0, ib: 0, gapBar: 0 };
 	let refreshers = [], selEls = {};
@@ -552,13 +557,36 @@
       for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, i % 2 ? 1 : -1, true);
       return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
     }
-    function ensureSilentEl() {
-      if (silentEl) return;
-      silentEl = new Audio(makeSilentUrl());
-      silentEl.loop = true;
-      // If the OS/headset pauses the element directly, stop the beat to match.
-      silentEl.addEventListener("pause", () => { if (playing) stopBeat(); });
-    }
+    function ensureMediaEl() {
+	  if (mediaEl) return;
+	  if (USE_STREAM) {
+	    mediaEl = new Audio();
+	    mediaEl.srcObject = streamDest.stream;
+	  } else {
+	    mediaEl = new Audio(makeSilentUrl());
+	    mediaEl.loop = true;
+	  }
+	  // "playing" for 30 s straight means we're stable again, so reset the retry backoff.
+	  mediaEl.addEventListener("playing", () => {
+	    clearTimeout(stableTimer);
+	    stableTimer = setTimeout(() => { resumeTries = 0; }, 30000);
+	  });
+	  // A pause we didn't ask for (stopBeat sets playing=false first) is an OS interruption.
+	  mediaEl.addEventListener("pause", () => {
+	    clearTimeout(stableTimer);
+	    if (playing) scheduleResume();
+	  });
+	}
+
+	function scheduleResume() {
+	  clearTimeout(resumeTimer);
+	  if (!playing || resumeTries >= RESUME_DELAYS.length) return;
+	  resumeTimer = setTimeout(() => {
+	    if (!playing || !mediaEl.paused) return;
+	    resumeTries++;
+	    mediaEl.play().catch(() => scheduleResume());
+	  }, RESUME_DELAYS[resumeTries]);
+	}
 
     // ---------------------------------------------------------------
     // Audio graph (built on Start, faded and dropped on Stop)
@@ -566,6 +594,7 @@
     function initContext() {
       const AC = window.AudioContext || window.webkitAudioContext;
       ctx = new AC({ latencyHint: "playback" });
+      if (USE_STREAM) streamDest = ctx.createMediaStreamDestination();
 
       // One shared noise buffer for snare + hats.
       const len = ctx.sampleRate;
@@ -590,7 +619,7 @@
       n.filter = ctx.createBiquadFilter();
       n.filter.type = "lowpass";
       n.filter.frequency.value = CUTOFF * st.cutoffMul;
-      n.filter.connect(n.comp).connect(n.out).connect(ctx.destination);
+      n.filter.connect(n.comp).connect(n.out).connect(USE_STREAM ? streamDest : ctx.destination);
 
       n.drums = ctx.createGain();  n.drums.connect(n.filter);
       n.pad = ctx.createGain();    n.pad.connect(n.filter);
@@ -1326,9 +1355,10 @@
     function startBeat() {
       if (playing) return;
       if (!ctx) initContext();
-      ensureSilentEl();
-      ctx.resume();
-      silentEl.play().catch(() => {});
+	  ensureMediaEl();
+	  ctx.resume();
+	  resumeTries = 0;
+	  mediaEl.play().catch(() => {});
       buildGraph();
       step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null; arpFreq = null;
       resetVariation();
@@ -1346,7 +1376,8 @@
       playing = false;                 // set first so the element's pause listener is a no-op
       timer.stop();
       teardownGraph();
-      if (silentEl) silentEl.pause();
+	  clearTimeout(resumeTimer);
+	  if (mediaEl) mediaEl.pause();
       resetVariation();
       radioInfo();
       $("playBtn").textContent = "Start Beat";
@@ -1396,17 +1427,21 @@
             { src: "app-icons/app-icon-512.png", sizes: "512x512", type: "image/png" }
           ]
         });
-        navigator.mediaSession.setActionHandler("play", () => (playing ? restartBeat() : startBeat()));
+        navigator.mediaSession.setActionHandler("play", () => {
+		  if (playing) { resumeTries = 0; mediaEl.play().catch(() => restartBeat()); }
+		  else startBeat();
+		});
+        
         navigator.mediaSession.setActionHandler("pause", stopBeat);
         navigator.mediaSession.setActionHandler("stop", stopBeat);
       } catch (e) {}
     }
 
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden || !playing) return;
-      if (silentEl && silentEl.paused) { stopBeat(); return; }   // OS paused us: show the truth
-      if (ctx.state !== "running") ctx.resume().catch(() => {});
-    });
+	  if (document.hidden || !playing) return;
+	  if (mediaEl && mediaEl.paused) { resumeTries = 0; mediaEl.play().catch(() => {}); }
+	  if (ctx.state !== "running") ctx.resume().catch(() => {});
+	});
 
     // PWA: offline support / installability
     if ("serviceWorker" in navigator) {
