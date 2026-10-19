@@ -157,12 +157,14 @@
 	button.alt.on { background: var(--accent); color: #1a1a1a; }
 	#radioInfo { font-size: 0.75rem; color: var(--muted); text-align: center; min-height: 1em; }
 	
+	#dbg { font-size: .65rem; color: var(--muted); white-space: pre-wrap; max-height: 40vh; overflow: auto; margin: 0; }
+	
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261016-1522</h2>
+    <h2>261016-1814</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -184,6 +186,9 @@
 
     <!-- Tempo, mixer and shape selectors are built from the current style -->
     <div id="controls"></div>
+    
+    <pre id="dbg" hidden></pre>
+    
   </div>
 
   <script>
@@ -454,14 +459,28 @@
       ]
     };
 
-    const LOOKAHEAD = 0.2;     // seconds scheduled ahead of the audio clock
-    const TICK_MS = 25;        // scheduler wake-up interval
+    const LOOKAHEAD = 0.5;     // seconds scheduled ahead of the audio clock
+    const TICK_MS = 50;        // scheduler wake-up interval
 
     // ---------------------------------------------------------------
     // State
     // ---------------------------------------------------------------
     let ctx = null, g = null, noiseBuf = null, timer = null, silentEl = null;
     let playing = false;
+    
+    // Diagnostic log: ring buffer in localStorage. Tap the version stamp to view/copy.
+	const LOG_KEY = "chillforge-log";
+	let LOG = [];
+	let lastBeat = 0, resumeTries = 0, resumeTimer = null;
+	try { LOG = JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (e) {}
+	function log(msg) {
+	  LOG.push(new Date().toLocaleString("sv-SE").slice(5) + " " + msg);
+	  if (LOG.length > 400) LOG.splice(0, LOG.length - 400);
+	  try { localStorage.setItem(LOG_KEY, JSON.stringify(LOG)); } catch (e) {}
+	}
+	const snap = () => "play=" + playing + " ctx=" + (ctx ? ctx.state : "-") +
+	  " el=" + (silentEl ? (silentEl.paused ? "paused" : "playing") : "-") + " vis=" + document.visibilityState;
+    
     let step = 0, nextTime = 0, chordIdx = 0;
     let currentChord = null, lastMelodyNote = null;
     let arpK = 0, arpFreq = null, irBuf = null;   // arpFreq = last arp note played (Wander/Scatter memory)
@@ -552,13 +571,29 @@
       for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, i % 2 ? 1 : -1, true);
       return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
     }
-    function ensureSilentEl() {
-      if (silentEl) return;
-      silentEl = new Audio(makeSilentUrl());
-      silentEl.loop = true;
-      // If the OS/headset pauses the element directly, stop the beat to match.
-      silentEl.addEventListener("pause", () => { if (playing) stopBeat(); });
-    }
+
+	function ensureSilentEl() {
+	  if (silentEl) return;
+	  silentEl = new Audio(makeSilentUrl());
+	  silentEl.loop = true;
+	  ["play", "pause", "ended", "error", "stalled", "waiting"].forEach((ev) =>
+	    silentEl.addEventListener(ev, () => log("el " + ev + " " + snap())));
+	  silentEl.addEventListener("pause", onElPause);
+	}
+
+	// Our own stops set playing=false first, so reaching here while playing means the system paused us.
+	// Retry with backoff; give up (and show the truth) only if it keeps failing.
+	function onElPause() {
+	  if (!playing) return;
+	  clearTimeout(resumeTimer);
+	  const delay = [1000, 2000, 5000, 10000, 15000][resumeTries];
+	  if (delay === undefined) { stopBeat("system pause, resume failed"); return; }
+	  resumeTimer = setTimeout(() => {
+	    if (!playing) return;
+	    resumeTries++;
+	    silentEl.play().then(() => log("el resumed")).catch((e) => { log("el resume failed: " + e.name); onElPause(); });
+	  }, delay);
+	}
 
     // ---------------------------------------------------------------
     // Audio graph (built on Start, faded and dropped on Stop)
@@ -575,8 +610,9 @@
 
       timer = makeTimer(tick, TICK_MS);
       ctx.onstatechange = () => {
-        if (playing && ctx.state !== "running") ctx.resume().catch(() => {});
-      };
+	    log("ctx " + ctx.state + " " + snap());
+	    if (playing && ctx.state !== "running") ctx.resume().catch(() => {});
+	  };
     }
 
     function buildGraph() {
@@ -1129,15 +1165,21 @@
     }
 
     function tick() {
-      if (!playing || !g) return;
-      const now = ctx.currentTime;
-      if (nextTime < now - 0.1) nextTime = now + 0.05;   // fell behind: resync, don't burst
-      while (nextTime < now + LOOKAHEAD) {
-        scheduleStep(step, nextTime);
-        nextTime += stepDur();
-        step = (step + 1) % 16;
-      }
-    }
+	  if (!playing || !g) return;
+	  const now = ctx.currentTime;
+	  if (nextTime < now - 0.1) nextTime = now + 0.05;
+	  while (nextTime < now + LOOKAHEAD) {
+	    try { scheduleStep(step, nextTime); }
+	    catch (e) { log("ERR step " + step + ": " + (e && e.message)); }
+	    nextTime += stepDur();
+	    step = (step + 1) % 16;
+	  }
+	  if (Date.now() - lastBeat > 300000) {          // heartbeat every 5 min
+	    lastBeat = Date.now();
+	    if (silentEl && !silentEl.paused) resumeTries = 0;   // stable for a while: reset the retry budget
+	    log("hb " + snap() + " ct=" + Math.round(ctx.currentTime));
+	  }
+	}
 
     // ---------------------------------------------------------------
     // Settings: per-style memory, saved between visits
@@ -1325,6 +1367,7 @@
     // ---------------------------------------------------------------
     function startBeat() {
       if (playing) return;
+      log("start " + snap());
       if (!ctx) initContext();
       ensureSilentEl();
       ctx.resume();
@@ -1341,10 +1384,11 @@
       if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
     }
 
-    function stopBeat() {
-      if (!playing) return;
-      playing = false;                 // set first so the element's pause listener is a no-op
-      timer.stop();
+	function stopBeat(why) {
+	  if (!playing) return;
+	  log("stop: " + (typeof why === "string" ? why : "ui") + " " + snap());
+	  playing = false;
+	  clearTimeout(resumeTimer); resumeTries = 0;      timer.stop();
       teardownGraph();
       if (silentEl) silentEl.pause();
       resetVariation();
@@ -1396,17 +1440,33 @@
             { src: "app-icons/app-icon-512.png", sizes: "512x512", type: "image/png" }
           ]
         });
-        navigator.mediaSession.setActionHandler("play", () => (playing ? restartBeat() : startBeat()));
-        navigator.mediaSession.setActionHandler("pause", stopBeat);
-        navigator.mediaSession.setActionHandler("stop", stopBeat);
+        navigator.mediaSession.setActionHandler("play", () => { log("ms play " + snap()); playing ? restartBeat() : startBeat(); });
+		navigator.mediaSession.setActionHandler("pause", () => stopBeat("ms pause"));
+		navigator.mediaSession.setActionHandler("stop", () => stopBeat("ms stop"));
       } catch (e) {}
     }
 
-    document.addEventListener("visibilitychange", () => {
-      if (document.hidden || !playing) return;
-      if (silentEl && silentEl.paused) { stopBeat(); return; }   // OS paused us: show the truth
-      if (ctx.state !== "running") ctx.resume().catch(() => {});
-    });
+	document.addEventListener("visibilitychange", () => {
+	  log("vis " + document.visibilityState + " " + snap());
+	  if (document.hidden || !playing) return;
+	  if (silentEl && silentEl.paused) silentEl.play().catch(() => stopBeat("visible, el paused"));
+	  if (ctx.state !== "running") ctx.resume().catch(() => {});
+	});
+	document.addEventListener("freeze", () => log("page freeze"));
+	document.addEventListener("resume", () => log("page resume"));
+	window.addEventListener("pagehide", () => log("pagehide"));
+	window.addEventListener("error", (e) => log("ERR " + e.message));
+	window.addEventListener("unhandledrejection", () => log("ERR unhandled rejection"));
+	log("boot " + snap());
+
+	$("ver").addEventListener("click", () => {
+	  const p = $("dbg");
+	  p.hidden = !p.hidden;
+	  if (!p.hidden) {
+	    p.textContent = LOG.slice(-80).reverse().join("\n");   // newest first
+	    if (navigator.clipboard) navigator.clipboard.writeText(LOG.join("\n")).catch(() => {});
+	  }
+	});
 
     // PWA: offline support / installability
     if ("serviceWorker" in navigator) {
