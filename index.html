@@ -169,7 +169,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261019-0958</h2>
+    <h2>261019-1513</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -604,11 +604,6 @@
 	    logEvent("b", "JavaScript did not run for " + fmtDur(gap) + " (device slept or the browser froze the page).");
 	    return;                                     // judge the audio on the next pass
 	  }
-	  if (mediaEl.paused) {                         // OS interruption: the retry logic owns this
-	    wd.strikes = 0;
-	    if (resumeTries >= RESUME_DELAYS.length) { resumeTries = 0; scheduleResume(); }   // revive after giving up
-	    return;
-	  }
 	
 	  let kind = null, msg = "";
 	  if (ctx.state !== "running") { kind = "engine"; msg = "Audio engine is " + ctx.state + " while the media element is playing"; }
@@ -718,18 +713,9 @@
 	  if (!playing) return;
 	  pausedAt = Date.now();
 	  logEvent("w", explainPause());
-	  scheduleResume();
+	  // Yield: the OS took audio focus, so go silent. The "playing" listener wakes the engine on return.
+	  if (ctx && ctx.state === "running") ctx.suspend().catch(() => {});
 	});
-	}
-
-	function scheduleResume() {
-	  clearTimeout(resumeTimer);
-	  if (!playing || resumeTries >= RESUME_DELAYS.length) return;
-	  resumeTimer = setTimeout(() => {
-	    if (!playing || !mediaEl.paused) return;
-	    resumeTries++;
-	    mediaEl.play().catch(() => scheduleResume());
-	  }, RESUME_DELAYS[resumeTries]);
 	}
 
     // ---------------------------------------------------------------
@@ -1600,8 +1586,7 @@
     document.addEventListener("visibilitychange", () => {
 	  if (playing) logEvent("i", document.hidden ? "Screen off / app hidden" : "App visible again");
 	  if (document.hidden || !playing) return;
-	  if (mediaEl && mediaEl.paused) { resumeTries = 0; mediaEl.play().catch(() => {}); }
-	  if (ctx.state !== "running") ctx.resume().catch(() => {});
+	  if (!mediaEl.paused && ctx.state !== "running") ctx.resume().catch(() => {});
 	});
 	document.addEventListener("freeze", () => {
 	  if (playing) { logEvent("b", "Browser froze this page (Page Lifecycle 'freeze'); nothing runs until it resumes"); saveLog(); }
