@@ -169,7 +169,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261019-0750</h2>
+    <h2>261019-0958</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -1589,6 +1589,7 @@
         navigator.mediaSession.setActionHandler("play", () => {
 		  if (playing) { resumeTries = 0; mediaEl.play().catch(() => restartBeat()); }
 		  else startBeat();
+		  logEvent("i", "Media control: play received (" + (playing ? "already playing" : "starting") + ")");
 		});
         
         navigator.mediaSession.setActionHandler("pause", () => stopBeat("lock-screen/headset pause"));
