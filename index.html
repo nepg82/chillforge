@@ -157,19 +157,12 @@
 	button.alt.on { background: var(--accent); color: #1a1a1a; }
 	#radioInfo { font-size: 0.75rem; color: var(--muted); text-align: center; min-height: 1em; }
 	
-	#logList { font: 0.72rem/1.4 ui-monospace, Menlo, Consolas, monospace; color: var(--muted); max-height: 280px; overflow-y: auto; margin-top: 8px; }
-	#logList .e { padding: 4px 0; border-bottom: 1px solid var(--border); }
-	#logList .e div { opacity: 0.7; }
-	#logList .warn { color: var(--accent); }
-	#logList .bad { color: #e76f51; }
-	#logList b { color: var(--text); font-weight: 600; }
-
   </style>
 </head>
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2>261019-1513</h2>
+    <h2>261016-1522</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -191,14 +184,6 @@
 
     <!-- Tempo, mixer and shape selectors are built from the current style -->
     <div id="controls"></div>
-    <button id="logBtn" class="alt">Log</button>
-	<div id="logPanel" hidden>
-	  <div class="radiorow">
-	    <button id="logCopy" class="alt">Copy</button>
-	    <button id="logClear" class="alt">Clear</button>
-	  </div>
-	  <div id="logList"></div>
-	</div>
   </div>
 
   <script>
@@ -471,16 +456,11 @@
 
     const LOOKAHEAD = 0.2;     // seconds scheduled ahead of the audio clock
     const TICK_MS = 25;        // scheduler wake-up interval
-	const USE_STREAM = false;   // false = old behavior (silent WAV + ctx.destination)
-	// Delays between resume attempts after the OS pauses us (e.g. an alarm). Backs off so we
-	// don't grab audio focus back while the alarm is still ringing.
-	const RESUME_DELAYS = [2, 5, 10, 20].map((s) => s * 1000).concat(Array(120).fill(30000));
 
     // ---------------------------------------------------------------
     // State
     // ---------------------------------------------------------------
-    let ctx = null, g = null, noiseBuf = null, timer = null, mediaEl = null, streamDest = null;
-	let resumeTimer = null, resumeTries = 0, stableTimer = null;
+    let ctx = null, g = null, noiseBuf = null, timer = null, silentEl = null;
     let playing = false;
     let step = 0, nextTime = 0, chordIdx = 0;
     let currentChord = null, lastMelodyNote = null;
@@ -491,7 +471,7 @@
     const V = { mute: null, bars: 0, skip: 1 };
     
     const RADIO_SEC = [210, 390];
-    const RADIO_STEP_CHOICES = [4, 4, 8];   // bars between each channel entering (intro) or dropping (outro); one is picked per channel
+    const RADIO_STEP_CHOICES = [4, 8, 8];   // bars between each channel entering (intro) or dropping (outro); one is picked per channel
 	const R = { on: false, base: null, n: 0, bar: 0, phase: "body", skip: false, mute: null,
 	            intro: [], out: [], introBars: 0, ib: 0, gapBar: 0 };
 	let refreshers = [], selEls = {};
@@ -505,124 +485,6 @@
     const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const chanDefs = (st) => [MASTER, ...st.channels];
-
-	// 	---------------------------------------------------------------
-	// Event log + watchdog
-	// ---------------------------------------------------------------
-	const LOG_KEY = "chillforge-log", HB_KEY = "chillforge-hb", LOG_MAX = 300;
-	const WD_MS = 2000, WD_FREEZE = 10000;   // watchdog interval; JS gap treated as a freeze
-	let LOG = [];
-	try { LOG = JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (e) {}
-	if (!Array.isArray(LOG)) LOG = [];
-	let logTimer = null, wdTimer = null, tickCount = 0, pausedAt = 0, restarting = false;
-	const wd = { t: 0, ctxTime: -1, ticks: 0, strikes: 0, hb: 0 };
-	
-	const fmtDur = (ms) => { const s = Math.round(ms / 1000); return s < 60 ? s + " s" : Math.floor(s / 60) + " min " + (s % 60) + " s"; };
-	
-	function saveLog() {
-	  clearTimeout(logTimer);
-	  try { localStorage.setItem(LOG_KEY, JSON.stringify(LOG)); } catch (e) {}
-	}
-	const snap = () => "screen=" + document.visibilityState + " engine=" + (ctx ? ctx.state : "none") +
-	  " element=" + (mediaEl ? (mediaEl.paused ? "paused" : "playing") : "none");
-	
-	// level: "i" info, "w" warning (interruption), "b" serious (recovery / death)
-	function logEvent(level, msg, withSnap) {
-	  LOG.push({ t: Date.now(), l: level, m: msg, s: withSnap === false ? "" : snap() });
-	  if (LOG.length > LOG_MAX) LOG.splice(0, LOG.length - LOG_MAX);
-	  clearTimeout(logTimer);
-	  logTimer = setTimeout(saveLog, 500);
-	  renderLog();
-	}
-	
-	function renderLog() {
-	  if ($("logPanel").hidden) return;
-	  const box = $("logList");
-	  box.textContent = "";
-	  const day = Date.now() - 864e5, recent = LOG.filter((e) => e.t > day);
-	  const sum = el("div", "e");
-	  sum.textContent = "Last 24 h: " + recent.filter((e) => e.l === "w").length + " warnings, " +
-	    recent.filter((e) => e.l === "b").length + " serious events";
-	  box.appendChild(sum);
-	  LOG.slice().reverse().forEach((e) => {
-	    const row = el("div", "e " + (e.l === "b" ? "bad" : e.l === "w" ? "warn" : ""));
-	    const b = el("b");
-	    b.textContent = new Date(e.t).toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", second: "2-digit" });
-	    row.append(b, " " + e.m);
-	    if (e.s) { const s = el("div"); s.textContent = e.s; row.appendChild(s); }
-	    box.appendChild(row);
-	  });
-	}
-	
-	// Last-known-alive marker, so the next launch can tell if we died while playing.
-	function writeHb(isPlaying) {
-	  try { localStorage.setItem(HB_KEY, JSON.stringify({ t: Date.now(), p: isPlaying })); } catch (e) {}
-	}
-	
-	function explainPause() {
-	  const eng = ctx ? ctx.state : "none";
-	  const where = document.visibilityState === "hidden" ? "screen off or app in background" : "app on screen";
-	  if (eng !== "running")
-	    return "OS paused playback: media element AND audio engine (" + eng + ") both stopped (" + where +
-	      "). Likely another app took full audio focus (alarm, call) or the system suspended the browser.";
-	  return "OS paused the media element (" + where + ") but the audio engine is still running. " +
-	    "Likely another app took audio focus (alarm, call, other media). Compare this time with your alarm.";
-	}
-	
-	// Level 1: new scheduler Worker + new graph, same AudioContext.
-	function softRecover(why) {
-	  logEvent("b", "Recovery 1 (restart scheduler and graph): " + why);
-	  timer.end();
-	  timer = makeTimer(tick, TICK_MS);
-	  restartBeat();
-	}
-	
-	// Level 2: throw the AudioContext away and build a new one. (Written for USE_STREAM = false.)
-	function hardReset(why) {
-	  logEvent("b", "Recovery 2 (rebuild audio engine from scratch): " + why);
-	  playing = false;
-	  timer.end();
-	  try { teardownGraph(); } catch (e) {}
-	  try { ctx.close().catch(() => {}); } catch (e) {}
-	  ctx = null; g = null; irBuf = null;
-	  Object.keys(waveCache).forEach((k) => delete waveCache[k]);   // periodic waves belong to the old context
-	  restarting = true;
-	  startBeat();
-	  restarting = false;
-	}
-	
-	function watchdog() {
-	  const now = Date.now(), gap = now - wd.t;
-	  wd.t = now;
-	  if (!playing || !ctx) return;
-	
-	  const ct = ctx.currentTime, clockMoved = ct !== wd.ctxTime, ticked = tickCount !== wd.ticks;
-	  wd.ctxTime = ct; wd.ticks = tickCount;
-	  if (now - wd.hb > 10000) { wd.hb = now; writeHb(true); }
-	
-	  if (gap > WD_FREEZE) {
-	    logEvent("b", "JavaScript did not run for " + fmtDur(gap) + " (device slept or the browser froze the page).");
-	    return;                                     // judge the audio on the next pass
-	  }
-	
-	  let kind = null, msg = "";
-	  if (ctx.state !== "running") { kind = "engine"; msg = "Audio engine is " + ctx.state + " while the media element is playing"; }
-	  else if (!clockMoved) { kind = "stall"; msg = "Audio clock stopped advancing (output device or engine stalled)"; }
-	  else if (!ticked) { kind = "stall"; msg = "Scheduler stopped ticking (timer Worker stalled) while the audio clock runs"; }
-	
-	  if (!kind) {
-	    if (wd.strikes > 0) logEvent("i", "Audio healthy again");
-	    wd.strikes = 0;
-	    return;
-	  }
-	  wd.strikes++;
-	  if (wd.strikes === 1) logEvent("w", msg);
-	  if (kind === "engine") {
-	    ctx.resume().catch(() => {});
-	    if (wd.strikes === 45) hardReset(msg + " for 90 s");
-	  } else if (wd.strikes === 2) softRecover(msg);
-	  else if (wd.strikes === 4) hardReset(msg + "; restart did not fix it");
-	}
 
     // ---------------------------------------------------------------
     // Helpers
@@ -669,10 +531,10 @@
         const src = "let id;onmessage=e=>{clearInterval(id);if(e.data==='start')id=setInterval(()=>postMessage(0)," + ms + ")}";
         const w = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
         w.onmessage = cb;
-        return { start() { w.postMessage("start"); }, stop() { w.postMessage("stop"); }, end() { w.terminate(); } };
+        return { start() { w.postMessage("start"); }, stop() { w.postMessage("stop"); } };
       } catch (e) {
         let id;
-        return { start() { clearInterval(id); id = setInterval(cb, ms); }, stop() { clearInterval(id); }, end() { clearInterval(id); } };
+        return { start() { id = setInterval(cb, ms); }, stop() { clearInterval(id); } };
       }
     }
 
@@ -690,33 +552,13 @@
       for (let i = 0; i < n; i++) v.setInt16(44 + i * 2, i % 2 ? 1 : -1, true);
       return URL.createObjectURL(new Blob([buf], { type: "audio/wav" }));
     }
-    function ensureMediaEl() {
-	  if (mediaEl) return;
-	  if (USE_STREAM) {
-	    mediaEl = new Audio();
-	    mediaEl.srcObject = streamDest.stream;
-	  } else {
-	    mediaEl = new Audio(makeSilentUrl());
-	    mediaEl.loop = true;
-	  }
-	  mediaEl.addEventListener("playing", () => {
-	  clearTimeout(stableTimer);
-	  stableTimer = setTimeout(() => { resumeTries = 0; }, 30000);
-	  if (pausedAt && playing) {
-	    logEvent("i", "Media element resumed after " + fmtDur(Date.now() - pausedAt) + " (retry " + resumeTries + ")");
-	    pausedAt = 0;
-	  }
-	  if (playing && ctx && ctx.state !== "running") ctx.resume().catch(() => {});   // focus is back, so wake the engine too
-	});
-	mediaEl.addEventListener("pause", () => {
-	  clearTimeout(stableTimer);
-	  if (!playing) return;
-	  pausedAt = Date.now();
-	  logEvent("w", explainPause());
-	  // Yield: the OS took audio focus, so go silent. The "playing" listener wakes the engine on return.
-	  if (ctx && ctx.state === "running") ctx.suspend().catch(() => {});
-	});
-	}
+    function ensureSilentEl() {
+      if (silentEl) return;
+      silentEl = new Audio(makeSilentUrl());
+      silentEl.loop = true;
+      // If the OS/headset pauses the element directly, stop the beat to match.
+      silentEl.addEventListener("pause", () => { if (playing) stopBeat(); });
+    }
 
     // ---------------------------------------------------------------
     // Audio graph (built on Start, faded and dropped on Stop)
@@ -724,7 +566,6 @@
     function initContext() {
       const AC = window.AudioContext || window.webkitAudioContext;
       ctx = new AC({ latencyHint: "playback" });
-      if (USE_STREAM) streamDest = ctx.createMediaStreamDestination();
 
       // One shared noise buffer for snare + hats.
       const len = ctx.sampleRate;
@@ -733,12 +574,9 @@
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
 
       timer = makeTimer(tick, TICK_MS);
-      const c = ctx;
-	  c.onstatechange = () => {
-	    if (ctx !== c) return;                        // a replaced context
-	    if (playing) logEvent(c.state === "running" ? "i" : "w", "Audio engine → " + c.state);
-	    if (playing && c.state !== "running" && mediaEl && !mediaEl.paused) c.resume().catch(() => {});
-	  };
+      ctx.onstatechange = () => {
+        if (playing && ctx.state !== "running") ctx.resume().catch(() => {});
+      };
     }
 
     function buildGraph() {
@@ -752,7 +590,7 @@
       n.filter = ctx.createBiquadFilter();
       n.filter.type = "lowpass";
       n.filter.frequency.value = CUTOFF * st.cutoffMul;
-      n.filter.connect(n.comp).connect(n.out).connect(USE_STREAM ? streamDest : ctx.destination);
+      n.filter.connect(n.comp).connect(n.out).connect(ctx.destination);
 
       n.drums = ctx.createGain();  n.drums.connect(n.filter);
       n.pad = ctx.createGain();    n.pad.connect(n.filter);
@@ -1291,7 +1129,6 @@
     }
 
     function tick() {
-      tickCount++;
       if (!playing || !g) return;
       const now = ctx.currentTime;
       if (nextTime < now - 0.1) nextTime = now + 0.05;   // fell behind: resync, don't burst
@@ -1487,58 +1324,45 @@
     // Transport
     // ---------------------------------------------------------------
     function startBeat() {
-	  if (playing) return;
-	  if (!ctx) initContext();
-	  ensureMediaEl();
-	  ctx.resume();
-	  resumeTries = 0;
-	  mediaEl.play().catch(() => {});
-	  buildGraph();
-	  step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null; arpFreq = null;
-	  resetVariation();
-	  if (R.on) { R.n = 0; R.skip = false; radioNewTrack(true); }
-	  nextTime = ctx.currentTime + 0.1;
-	  playing = true;
-	  timer.start();
-	  if (!restarting) { wd.t = Date.now(); wd.strikes = 0; wd.ctxTime = -1; wd.ticks = tickCount; }
-	  if (!wdTimer) wdTimer = makeTimer(watchdog, WD_MS);
-	  wdTimer.start();
-	  writeHb(true);
-	  if (!restarting) logEvent("i", "Started: " + STYLES[styleKey].label + ", " + S.bpm + " BPM" + (R.on ? ", Radio" : ""));
-	  $("playBtn").textContent = "Stop Beat";
-	  $("playBtn").classList.add("playing");
-	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
-	}
-	
-	function stopBeat(why) {
-	  if (!playing) return;
-	  playing = false;                 // set first so the element's pause listener is a no-op
-	  timer.stop();
-	  if (wdTimer) wdTimer.stop();
-	  teardownGraph();
-	  clearTimeout(resumeTimer);
-	  pausedAt = 0;
-	  if (mediaEl) mediaEl.pause();
-	  writeHb(false);
-	  logEvent("i", "Stopped by " + (typeof why === "string" ? why : "a media control"));
-	  resetVariation();
-	  radioInfo();
-	  $("playBtn").textContent = "Start Beat";
-	  $("playBtn").classList.remove("playing");
-	  if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
-	}
-	
-	// Rebuilds the graph while the media element keeps playing.
-	function restartBeat() {
-	  restarting = true;
-	  playing = false;
-	  timer.stop();
-	  teardownGraph();
-	  startBeat();
-	  restarting = false;
-	}
+      if (playing) return;
+      if (!ctx) initContext();
+      ensureSilentEl();
+      ctx.resume();
+      silentEl.play().catch(() => {});
+      buildGraph();
+      step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null; arpFreq = null;
+      resetVariation();
+      if (R.on) { R.n = 0; R.skip = false; radioNewTrack(true); }
+      nextTime = ctx.currentTime + 0.1;
+      playing = true;
+      timer.start();
+      $("playBtn").textContent = "Stop Beat";
+      $("playBtn").classList.add("playing");
+      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+    }
 
-    $("playBtn").addEventListener("click", () => (playing ? stopBeat("Stop button") : startBeat()));
+    function stopBeat() {
+      if (!playing) return;
+      playing = false;                 // set first so the element's pause listener is a no-op
+      timer.stop();
+      teardownGraph();
+      if (silentEl) silentEl.pause();
+      resetVariation();
+      radioInfo();
+      $("playBtn").textContent = "Start Beat";
+      $("playBtn").classList.remove("playing");
+      if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+    }
+
+    // Beat is "playing" on paper but the audio died: rebuild without touching the silent element.
+    function restartBeat() {
+      playing = false;
+      timer.stop();
+      teardownGraph();
+      startBeat();
+    }
+
+    $("playBtn").addEventListener("click", () => (playing ? stopBeat() : startBeat()));
 	$("radioBtn").addEventListener("click", () => setRadio(!R.on));
 	$("nextBtn").addEventListener("click", () => { if (R.on && playing) R.skip = true; });
 
@@ -1572,47 +1396,17 @@
             { src: "app-icons/app-icon-512.png", sizes: "512x512", type: "image/png" }
           ]
         });
-        navigator.mediaSession.setActionHandler("play", () => {
-		  if (playing) { resumeTries = 0; mediaEl.play().catch(() => restartBeat()); }
-		  else startBeat();
-		  logEvent("i", "Media control: play received (" + (playing ? "already playing" : "starting") + ")");
-		});
-        
-        navigator.mediaSession.setActionHandler("pause", () => stopBeat("lock-screen/headset pause"));
-		navigator.mediaSession.setActionHandler("stop", () => stopBeat("lock-screen/headset stop"));
+        navigator.mediaSession.setActionHandler("play", () => (playing ? restartBeat() : startBeat()));
+        navigator.mediaSession.setActionHandler("pause", stopBeat);
+        navigator.mediaSession.setActionHandler("stop", stopBeat);
       } catch (e) {}
     }
 
     document.addEventListener("visibilitychange", () => {
-	  if (playing) logEvent("i", document.hidden ? "Screen off / app hidden" : "App visible again");
-	  if (document.hidden || !playing) return;
-	  if (!mediaEl.paused && ctx.state !== "running") ctx.resume().catch(() => {});
-	});
-	document.addEventListener("freeze", () => {
-	  if (playing) { logEvent("b", "Browser froze this page (Page Lifecycle 'freeze'); nothing runs until it resumes"); saveLog(); }
-	});
-	document.addEventListener("resume", () => { if (playing) logEvent("w", "Page unfrozen"); });
-	window.addEventListener("pagehide", () => {
-	  if (playing) { logEvent("w", "Page hidden or closing (pagehide)"); saveLog(); }
-	});
-
-	$("logBtn").addEventListener("click", () => { $("logPanel").hidden = !$("logPanel").hidden; renderLog(); });
-	$("logClear").addEventListener("click", () => { LOG = []; saveLog(); renderLog(); });
-	$("logCopy").addEventListener("click", () => {
-	  const text = LOG.map((e) => new Date(e.t).toLocaleString() + " [" + e.l + "] " + e.m + (e.s ? " | " + e.s : "")).join("\n");
-	  if (!navigator.clipboard) return;
-	  navigator.clipboard.writeText(text).then(() => {
-	    $("logCopy").textContent = "Copied";
-	    setTimeout(() => { $("logCopy").textContent = "Copy"; }, 1500);
-	  }).catch(() => {});
-	});
-	try {
-	  const hb = JSON.parse(localStorage.getItem(HB_KEY) || "null");
-	  if (hb && hb.p) logEvent("b", "Previous session ended while playing; last sign of life at " +
-	    new Date(hb.t).toLocaleTimeString() + ". The app was closed or killed by the system (e.g. memory pressure).", false);
-	  writeHb(false);
-	} catch (e) {}
-	logEvent("i", "App launched", false);
+      if (document.hidden || !playing) return;
+      if (silentEl && silentEl.paused) { stopBeat(); return; }   // OS paused us: show the truth
+      if (ctx.state !== "running") ctx.resume().catch(() => {});
+    });
 
     // PWA: offline support / installability
     if ("serviceWorker" in navigator) {
