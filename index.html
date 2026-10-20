@@ -164,7 +164,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261020-0719</h2>
+    <h2 id="ver">261020-0747</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -472,14 +472,29 @@
 	const LOG_KEY = "chillforge-log";
 	let LOG = [];
 	let lastBeat = 0, resumeTries = 0, resumeTimer = null;
+	let waitCount = 0, lastAliveTs = 0;
 	try { LOG = JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (e) {}
 	function log(msg) {
 	  LOG.push(new Date().toLocaleString("sv-SE").slice(5) + " " + msg);
-	  if (LOG.length > 400) LOG.splice(0, LOG.length - 400);
+	  if (LOG.length > 1500) LOG.splice(0, LOG.length - 1500);
 	  try { localStorage.setItem(LOG_KEY, JSON.stringify(LOG)); } catch (e) {}
 	}
 	const snap = () => "play=" + playing + " ctx=" + (ctx ? ctx.state : "-") +
 	  " el=" + (silentEl ? (silentEl.paused ? "paused" : "playing") : "-") + " vis=" + document.visibilityState;
+    
+    let batt = null;
+	try { navigator.getBattery().then((b) => { batt = b; }).catch(() => {}); } catch (e) {}
+	const diag = () => " mem=" + (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) + "MB" : "?") +
+	  " bat=" + (batt ? Math.round(batt.level * 100) + (batt.charging ? "+" : "%") : "?") + " w=" + waitCount;
+	function alive(why) {
+	  try { localStorage.setItem("chillforge-alive", JSON.stringify({ t: Date.now(), p: playing, w: why })); } catch (e) {}
+	}
+	try {
+	  const pv = JSON.parse(localStorage.getItem("chillforge-alive") || "null");
+	  if (pv && pv.p) log("PREV SESSION ENDED WHILE PLAYING. last alive " +
+	    new Date(pv.t).toLocaleString("sv-SE").slice(5) + " (" + pv.w + ") discarded=" + document.wasDiscarded);
+	} catch (e) {}
+	alive("boot");
     
     let step = 0, nextTime = 0, chordIdx = 0;
     let currentChord = null, lastMelodyNote = null;
@@ -576,9 +591,9 @@
 	  if (silentEl) return;
 	  silentEl = new Audio(makeSilentUrl());
 	  silentEl.loop = true;
-	  ["play", "pause", "ended", "error", "stalled", "waiting"].forEach((ev) =>
+	  ["play", "pause", "ended", "error", "stalled"].forEach((ev) =>
 	    silentEl.addEventListener(ev, () => log("el " + ev + " " + snap())));
-	  silentEl.addEventListener("pause", onElPause);
+	  silentEl.addEventListener("waiting", () => { waitCount++; });
 	}
 
 	// Our own stops set playing=false first, so reaching here while playing means the system paused us.
@@ -1174,7 +1189,7 @@
 	    nextTime += stepDur();
 	    step = (step + 1) % 16;
 	  }
-	  if (Date.now() - lastBeat > 300000) {          // heartbeat every 5 min
+	  if (Date.now() - lastAliveTs > 30000) { lastAliveTs = Date.now(); alive("tick"); }
 	    lastBeat = Date.now();
 	    if (silentEl && !silentEl.paused) resumeTries = 0;   // stable for a while: reset the retry budget
 	    log("hb " + snap() + " ct=" + Math.round(ctx.currentTime));
@@ -1378,6 +1393,7 @@
       if (R.on) { R.n = 0; R.skip = false; radioNewTrack(true); }
       nextTime = ctx.currentTime + 0.1;
       playing = true;
+      alive("start");
       timer.start();
       $("playBtn").textContent = "Stop Beat";
       $("playBtn").classList.add("playing");
@@ -1388,6 +1404,7 @@
 	  if (!playing) return;
 	  log("stop: " + (typeof why === "string" ? why : "ui") + " " + snap());
 	  playing = false;
+	  alive("stop");
 	  clearTimeout(resumeTimer); resumeTries = 0;      timer.stop();
       teardownGraph();
       if (silentEl) silentEl.pause();
@@ -1454,7 +1471,7 @@
 	});
 	document.addEventListener("freeze", () => log("page freeze"));
 	document.addEventListener("resume", () => log("page resume"));
-	window.addEventListener("pagehide", () => log("pagehide"));
+	window.addEventListener("pagehide", () => { log("pagehide"); alive("pagehide"); }
 	window.addEventListener("error", (e) => log("ERR " + e.message));
 	window.addEventListener("unhandledrejection", () => log("ERR unhandled rejection"));
 	log("boot " + snap());
@@ -1463,7 +1480,7 @@
 	  const p = $("dbg");
 	  p.hidden = !p.hidden;
 	  if (!p.hidden) {
-	    p.textContent = LOG.slice(-80).reverse().join("\n");   // newest first
+	    p.textContent = LOG.slice(-150).reverse().join("\n");   // newest first
 	    if (navigator.clipboard) navigator.clipboard.writeText(LOG.join("\n")).catch(() => {});
 	  }
 	});
