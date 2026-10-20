@@ -164,7 +164,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261020-0747</h2>
+    <h2 id="ver">261020-1159</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -594,6 +594,7 @@
 	  ["play", "pause", "ended", "error", "stalled"].forEach((ev) =>
 	    silentEl.addEventListener(ev, () => log("el " + ev + " " + snap())));
 	  silentEl.addEventListener("waiting", () => { waitCount++; });
+	  silentEl.addEventListener("pause", onElPause);
 	}
 
 	// Our own stops set playing=false first, so reaching here while playing means the system paused us.
@@ -1189,12 +1190,13 @@
 	    nextTime += stepDur();
 	    step = (step + 1) % 16;
 	  }
-	  if (Date.now() - lastAliveTs > 30000) { lastAliveTs = Date.now(); alive("tick"); }
-	    lastBeat = Date.now();
-	    if (silentEl && !silentEl.paused) resumeTries = 0;   // stable for a while: reset the retry budget
-	    log("hb " + snap() + " ct=" + Math.round(ctx.currentTime));
+	    if (Date.now() - lastAliveTs > 30000) { lastAliveTs = Date.now(); alive("tick"); }
+	    if (Date.now() - lastBeat > 300000) {          // heartbeat every 5 min
+	      lastBeat = Date.now();
+	      if (silentEl && !silentEl.paused) resumeTries = 0;
+	      log("hb " + snap() + " ct=" + Math.round(ctx.currentTime) + diag());
+	    }
 	  }
-	}
 
     // ---------------------------------------------------------------
     // Settings: per-style memory, saved between visits
@@ -1471,7 +1473,7 @@
 	});
 	document.addEventListener("freeze", () => log("page freeze"));
 	document.addEventListener("resume", () => log("page resume"));
-	window.addEventListener("pagehide", () => { log("pagehide"); alive("pagehide"); }
+	window.addEventListener("pagehide", () => { log("pagehide"); alive("pagehide"); });
 	window.addEventListener("error", (e) => log("ERR " + e.message));
 	window.addEventListener("unhandledrejection", () => log("ERR unhandled rejection"));
 	log("boot " + snap());
