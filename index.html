@@ -473,6 +473,9 @@
 	let LOG = [];
 	let lastBeat = 0, resumeTries = 0, resumeTimer = null;
 	let waitCount = 0, lastAliveTs = 0;
+	let yielded = false, yieldTimer = null;
+	const YIELD_GRACE_MS = 45000;
+	
 	try { LOG = JSON.parse(localStorage.getItem(LOG_KEY) || "[]"); } catch (e) {}
 	function log(msg) {
 	  LOG.push(new Date().toLocaleString("sv-SE").slice(5) + " " + msg);
@@ -595,20 +598,17 @@
 	    silentEl.addEventListener(ev, () => log("el " + ev + " " + snap())));
 	  silentEl.addEventListener("waiting", () => { waitCount++; });
 	  silentEl.addEventListener("pause", onElPause);
+	  silentEl.addEventListener("play", () => {
+	    if (playing && yielded) { yielded = false; clearTimeout(yieldTimer); applyMixer(); log("unyield: el playing again"); }
+	  });
 	}
 
-	// Our own stops set playing=false first, so reaching here while playing means the system paused us.
-	// Retry with backoff; give up (and show the truth) only if it keeps failing.
 	function onElPause() {
 	  if (!playing) return;
-	  clearTimeout(resumeTimer);
-	  const delay = [1000, 2000, 5000, 10000, 15000][resumeTries];
-	  if (delay === undefined) { stopBeat("system pause, resume failed"); return; }
-	  resumeTimer = setTimeout(() => {
-	    if (!playing) return;
-	    resumeTries++;
-	    silentEl.play().then(() => log("el resumed")).catch((e) => { log("el resume failed: " + e.name); onElPause(); });
-	  }, delay);
+	  yielded = true; applyMixer();
+	  log("yield: system paused el");
+	  clearTimeout(yieldTimer);
+	  yieldTimer = setTimeout(() => { if (playing && yielded) stopBeat("yielded to other audio"); }, YIELD_GRACE_MS);
 	}
 
     // ---------------------------------------------------------------
@@ -723,7 +723,7 @@
     function applyMixer(instant) {
       if (!g) return;
       const t = ctx.currentTime, tc = instant ? 0.001 : 0.03;
-      g.out.gain.setTargetAtTime(dbToGain(S.vol.master), t, tc);
+	  g.out.gain.setTargetAtTime(yielded ? 0 : dbToGain(S.vol.master), t, tc);
       STYLES[styleKey].channels.forEach((c) => {
         const node = g[c.id];
         if (!node) return;
@@ -1383,6 +1383,7 @@
     // Transport
     // ---------------------------------------------------------------
     function startBeat() {
+      yielded = false;
       if (playing) return;
       log("start " + snap());
       if (!ctx) initContext();
@@ -1407,7 +1408,8 @@
 	  log("stop: " + (typeof why === "string" ? why : "ui") + " " + snap());
 	  playing = false;
 	  alive("stop");
-	  clearTimeout(resumeTimer); resumeTries = 0;      timer.stop();
+	  clearTimeout(resumeTimer); clearTimeout(yieldTimer); yielded = false; resumeTries = 0;
+	  timer.stop();
       teardownGraph();
       if (silentEl) silentEl.pause();
       resetVariation();
@@ -1468,7 +1470,7 @@
 	document.addEventListener("visibilitychange", () => {
 	  log("vis " + document.visibilityState + " " + snap());
 	  if (document.hidden || !playing) return;
-	  if (silentEl && silentEl.paused) silentEl.play().catch(() => stopBeat("visible, el paused"));
+	  if (silentEl && silentEl.paused && !yielded) silentEl.play().catch(() => stopBeat("visible, el paused"));
 	  if (ctx.state !== "running") ctx.resume().catch(() => {});
 	});
 	document.addEventListener("freeze", () => log("page freeze"));
