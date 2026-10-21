@@ -1183,7 +1183,7 @@
     function tick() {
 	  if (!playing || !g) return;
 	  const now = ctx.currentTime;
-	  if (nextTime < now - 0.1) nextTime = now + 0.05;
+	  if (nextTime < now - 0.1) { log("RESYNC late=" + Math.round((now - nextTime) * 1000) + "ms"); nextTime = now + 0.05; }
 	  while (nextTime < now + LOOKAHEAD) {
 	    try { scheduleStep(step, nextTime); }
 	    catch (e) { log("ERR step " + step + ": " + (e && e.message)); }
@@ -1389,6 +1389,7 @@
       if (!ctx) initContext();
       ensureSilentEl();
       ctx.resume();
+      log("audio sr=" + ctx.sampleRate + " baseLat=" + (ctx.baseLatency || 0).toFixed(3) + " outLat=" + (ctx.outputLatency || 0).toFixed(3));
       silentEl.play().catch(() => {});
       buildGraph();
       step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null; arpFreq = null;
