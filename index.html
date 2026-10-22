@@ -619,7 +619,7 @@
       ctx = new AC({ latencyHint: "playback" });
 
       // One shared noise buffer for snare + hats.
-      const len = ctx.sampleRate;
+      const len = ctx.sampleRate * 3;
       noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
       const d = noiseBuf.getChannelData(0);
       for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
