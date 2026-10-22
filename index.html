@@ -664,6 +664,8 @@
         }
       }
 
+	  else if (st.lead === "dub") { n.bass = ctx.createGain(); n.bass.connect(n.filter); }
+
       // Pad tone shaping
       n.padFilter = ctx.createBiquadFilter();
       n.padFilter.type = "lowpass";
@@ -685,7 +687,7 @@
       const fb = ctx.createGain();   fb.gain.value = 0.38;
       const dLP = ctx.createBiquadFilter();
       dLP.type = "lowpass"; dLP.frequency.value = 1800;
-      n[st.lead].connect(send).connect(n.delay).connect(dLP);
+      if (n[st.lead]) n[st.lead].connect(send).connect(n.delay).connect(dLP);;
       dLP.connect(fb).connect(n.delay);
       dLP.connect(n.filter);
 
