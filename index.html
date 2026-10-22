@@ -164,7 +164,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261021-2219</h2>
+    <h2 id="ver">261022-0708</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -636,7 +636,6 @@
       n.out = ctx.createGain();
       n.out.gain.value = dbToGain(S.vol.master);
       const st = STYLES[styleKey];
-	  if (st.lead === "dub") { dubStep(s, t); return; }
       n.comp = ctx.createDynamicsCompressor();   // safety limiter
       n.comp.threshold.value = -10;
       n.comp.ratio.value = 6;
@@ -688,7 +687,7 @@
       const fb = ctx.createGain();   fb.gain.value = 0.38;
       const dLP = ctx.createBiquadFilter();
       dLP.type = "lowpass"; dLP.frequency.value = 1800;
-      if (n[st.lead]) n[st.lead].connect(send).connect(n.delay).connect(dLP);;
+      if (n[st.lead]) n[st.lead].connect(send).connect(n.delay).connect(dLP);
       dLP.connect(fb).connect(n.delay);
       dLP.connect(n.filter);
 
@@ -1407,7 +1406,7 @@
         const k = s ? 1 : 0, bh = S.bpm / 60, fill = i === n - 1;
         dBass(voice, t, r, k, bar, k ? sl * 5.5 : sl * 7.6, k ? bh * 4 : bh * song.wob[bar % 4] * (fill ? 2 : 1));
       }
-		  }
+	}
 	  
     // ---------------------------------------------------------------
     // Scheduler (16 steps per bar, 4/4)
@@ -1450,6 +1449,7 @@
 
     function scheduleStep(s, t) {
       const st = STYLES[styleKey];
+      if (st.lead === "dub") { dubStep(s, t); return; }
       if (s % 2 === 1) t += stepDur() * st.swing;          // swing the off-16ths
 
       if (s === 0) {
