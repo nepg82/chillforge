@@ -636,6 +636,7 @@
       n.out = ctx.createGain();
       n.out.gain.value = dbToGain(S.vol.master);
       const st = STYLES[styleKey];
+	  if (st.lead === "dub") { dubStep(s, t); return; }
       n.comp = ctx.createDynamicsCompressor();   // safety limiter
       n.comp.threshold.value = -10;
       n.comp.ratio.value = 6;
