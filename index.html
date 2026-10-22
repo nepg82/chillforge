@@ -1125,6 +1125,291 @@
     }
 
     // ---------------------------------------------------------------
+    // Dubstep (ported from Drop Lab). Self-contained: own style, drums,
+    // voices and arrangement. Prefixed d*/DUB* to avoid name collisions.
+    // ---------------------------------------------------------------
+    PROGRESSIONS.dub = {            // stub: Dubstep generates its own harmony per song
+      label: "Dubstep (Generated)",
+      chords: [["E2"], ["E2"], ["E2"], ["E2"]]
+    };
+
+    STYLES.dubstep = {
+      label: "Dubstep",
+      bpm: { min: 130, max: 150, def: 140 },
+      swing: 0,
+      progs: ["dub"],               // one entry -> the progression pulldown hides itself
+      lead: "dub", drums: "dub", jitter: 0,
+      cutoffMul: 7, padCutoff: 1800, reverb: 0, echo: 0,
+      channels: [
+        { id: "drums", label: "Drums", max: 6, def: -3 },
+        { id: "bass",  label: "Bass",  max: 6, def: -3 },
+        { id: "pad",   label: "Chords", max: 6, def: 0 }
+      ],
+      selects: [
+        { id: "bassVoice", label: "Bass", def: "saw",
+          options: [["saw", "Saw Wobble"], ["pulse", "Pulse Riff"], ["fm", "FM Growl"], ["vox", "Vowel Lead"]],
+          radio: ["saw", "pulse", "fm", "vox"] }
+      ]
+    };
+
+    const DUB = { song: null, sg: null, force: "", last: 0, bar: 0, fresh: false };
+    const DSEC = { intro: 0, build: 1, drop: 2, brk: 3 };
+    const DNAME = ["Intro", "Build", "Drop", "Breakdown"];
+    const DUTY = { saw: 0, pulse: 0.5, fm: 0.5, vox: 0.3 };   // chord waveform follows the bass voice
+    const DSC = [0, 2, 3, 5, 7, 8, 10], DPC = [0, 3, 5, -5, -4, -2], DMAJ = [3, -4, -2];
+    const mf = (m) => 440 * Math.pow(2, (m - 69) / 12);
+    const dpick = (a) => a[Math.floor(Math.random() * a.length)];
+
+    const dCurveCache = {};
+    function dCurve(k) {
+      if (!dCurveCache[k]) {
+        const c = new Float32Array(1024);
+        for (let i = 0; i < 1024; i++) { const x = i / 512 - 1; c[i] = (1 + k) * x / (1 + k * Math.abs(x)); }
+        dCurveCache[k] = c;
+      }
+      return dCurveCache[k];
+    }
+    // Band-limited pulse wave (cached per duty cycle).
+    const dPulseCache = {};
+    function dPulse(d) {
+      if (!dPulseCache[d]) {
+        const N = 64, re = new Float32Array(N), im = new Float32Array(N);
+        for (let n = 1; n < N; n++) {
+          re[n] = Math.sin(2 * Math.PI * n * d) / (n * Math.PI);
+          im[n] = (1 - Math.cos(2 * Math.PI * n * d)) / (n * Math.PI);
+        }
+        dPulseCache[d] = ctx.createPeriodicWave(re, im);
+      }
+      return dPulseCache[d];
+    }
+
+    // ---- Drums (all into g.drums) ----
+    function dNz(t, d, type, f, v, q, f2) {
+      const s = ctx.createBufferSource(), fl = ctx.createBiquadFilter(), gn = ctx.createGain();
+      s.buffer = noiseBuf; fl.type = type; fl.Q.value = q || 1; fl.frequency.setValueAtTime(f, t);
+      if (f2) fl.frequency.exponentialRampToValueAtTime(f2, t + d);
+      gn.gain.setValueAtTime(v, t); gn.gain.exponentialRampToValueAtTime(0.001, t + d);
+      s.connect(fl).connect(gn).connect(g.drums);
+      s.start(t, Math.random() * 1.2); s.stop(t + d + 0.02);
+    }
+    function dKick(t) {
+      const o = ctx.createOscillator(), gn = ctx.createGain(), ws = ctx.createWaveShaper();
+      o.frequency.setValueAtTime(180, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+      gn.gain.setValueAtTime(1, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.4);
+      ws.curve = dCurve(4);
+      o.connect(gn).connect(ws).connect(g.drums); o.start(t); o.stop(t + 0.45);
+    }
+    function dSnare(t, v) {
+      dNz(t, 0.18, "bandpass", 2200, v, 0.8);
+      const o = ctx.createOscillator(), gn = ctx.createGain();
+      o.type = "triangle";
+      o.frequency.setValueAtTime(240, t); o.frequency.exponentialRampToValueAtTime(150, t + 0.1);
+      gn.gain.setValueAtTime(v * 0.5, t); gn.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      o.connect(gn).connect(g.drums); o.start(t); o.stop(t + 0.15);
+    }
+    function dClap(t, v) {
+      dNz(t, 0.02, "bandpass", 1500, v); dNz(t + 0.012, 0.02, "bandpass", 1500, v); dNz(t + 0.026, 0.17, "bandpass", 1400, v);
+    }
+    const dHat = (t, open, v) => dNz(t, open ? 0.22 : 0.045, "highpass", 7500, v);
+    const dCrash = (t) => dNz(t, 1.6, "highpass", 5000, 0.5, 0.7, 3000);
+    function dRiser(t, d) {
+      const s = ctx.createBufferSource(), fl = ctx.createBiquadFilter(), gn = ctx.createGain();
+      s.buffer = noiseBuf; s.loop = true; fl.type = "bandpass"; fl.Q.value = 1.5;
+      fl.frequency.setValueAtTime(250, t); fl.frequency.exponentialRampToValueAtTime(9000, t + d);
+      gn.gain.setValueAtTime(0, t); gn.gain.linearRampToValueAtTime(0.55, t + d - 0.05); gn.gain.linearRampToValueAtTime(0, t + d);
+      s.connect(fl).connect(gn).connect(g.drums); s.start(t); s.stop(t + d + 0.05);
+      const o = ctx.createOscillator(), og = ctx.createGain();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(1800, t + d);
+      og.gain.setValueAtTime(0, t); og.gain.linearRampToValueAtTime(0.07, t + d - 0.05); og.gain.linearRampToValueAtTime(0, t + d);
+      o.connect(og).connect(g.drums); o.start(t); o.stop(t + d + 0.05);
+    }
+
+    // ---- Bass voices (into g.bass) ----
+    function dSaw(t, f, dur, o) {
+      const n = 3, vol = o.vol, fl = ctx.createBiquadFilter(), gn = ctx.createGain();
+      fl.type = "lowpass"; fl.Q.value = o.q; fl.frequency.value = o.c;
+      gn.gain.setValueAtTime(0, t); gn.gain.linearRampToValueAtTime(vol, t + 0.005);
+      gn.gain.setValueAtTime(vol, t + dur - 0.01); gn.gain.linearRampToValueAtTime(0, t + dur + 0.02);
+      for (let i = 0; i < n; i++) {
+        const os = ctx.createOscillator();
+        if (o.duty) os.setPeriodicWave(dPulse(o.duty)); else os.type = "sawtooth";
+        os.detune.value = (i / (n - 1) - 0.5) * 2 * o.det;
+        if (o.from) { os.frequency.setValueAtTime(o.from, t); os.frequency.exponentialRampToValueAtTime(f, t + 0.08); }
+        else os.frequency.value = f;
+        os.connect(fl); os.start(t); os.stop(t + dur + 0.05);
+      }
+      const s = ctx.createOscillator(), sg = ctx.createGain();
+      s.frequency.value = f * o.sm; sg.gain.value = o.sub; s.connect(sg).connect(gn); s.start(t); s.stop(t + dur + 0.05);
+      if (o.wob) {
+        const l = ctx.createOscillator(), lg = ctx.createGain();
+        l.frequency.value = o.wob; lg.gain.value = o.wd; l.connect(lg).connect(fl.frequency); l.start(t); l.stop(t + dur + 0.05);
+      }
+      fl.connect(gn).connect(g.bass);
+    }
+    function dFm(t, f, d, wob) {
+      const c = ctx.createOscillator(), m = ctx.createOscillator(), mg = ctx.createGain(), gn = ctx.createGain();
+      const ws = ctx.createWaveShaper(), lp = ctx.createBiquadFilter(), s = ctx.createOscillator(), sg = ctx.createGain();
+      c.frequency.setValueAtTime(f * 1.5, t); c.frequency.exponentialRampToValueAtTime(f, t + 0.07);
+      m.frequency.setValueAtTime(f * 1.5, t); m.frequency.exponentialRampToValueAtTime(f, t + 0.07);
+      mg.gain.value = f * 5;
+      const l = ctx.createOscillator(), lg = ctx.createGain();
+      l.frequency.value = wob; lg.gain.value = f * 5 * 0.85; l.connect(lg).connect(mg.gain); l.start(t); l.stop(t + d + 0.05);
+      m.connect(mg).connect(c.frequency);
+      ws.curve = dCurve(6); lp.type = "lowpass"; lp.frequency.value = 4200;
+      gn.gain.setValueAtTime(0, t); gn.gain.linearRampToValueAtTime(0.3, t + 0.005);
+      gn.gain.setValueAtTime(0.3, t + d - 0.01); gn.gain.linearRampToValueAtTime(0, t + d + 0.02);
+      c.connect(ws).connect(lp).connect(gn);
+      s.frequency.value = f / 2; sg.gain.value = 0.8; s.connect(sg).connect(gn);
+      gn.connect(g.bass);
+      [c, m, s].forEach((x) => { x.start(t); x.stop(t + d + 0.05); });
+    }
+    function dVox(t, f, d, wob, from) {
+      const gn = ctx.createGain(), f1 = ctx.createBiquadFilter(), f2 = ctx.createBiquadFilter();
+      gn.gain.setValueAtTime(0, t); gn.gain.linearRampToValueAtTime(0.5, t + 0.03);
+      gn.gain.setValueAtTime(0.5, t + d - 0.02); gn.gain.linearRampToValueAtTime(0, t + d + 0.03);
+      f1.type = f2.type = "bandpass"; f1.Q.value = 5; f2.Q.value = 7;
+      f1.frequency.setValueAtTime(750, t); f1.frequency.exponentialRampToValueAtTime(450, t + d);
+      f2.frequency.setValueAtTime(1250, t); f2.frequency.exponentialRampToValueAtTime(800, t + d);
+      const vb = ctx.createOscillator(), vg = ctx.createGain();
+      vb.frequency.value = 5.5; vg.gain.value = 18; vb.connect(vg); vb.start(t); vb.stop(t + d + 0.05);
+      [-8, 0, 8].forEach((dt) => {
+        const o = ctx.createOscillator();
+        o.setPeriodicWave(dPulse(0.3)); o.detune.value = dt;
+        if (from) { o.frequency.setValueAtTime(from, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.08); }
+        else o.frequency.value = f;
+        vg.connect(o.detune); o.connect(f1); o.connect(f2); o.start(t); o.stop(t + d + 0.05);
+      });
+      const l = ctx.createOscillator(), lg = ctx.createGain();
+      l.frequency.value = wob; lg.gain.value = 450; l.connect(lg).connect(f2.frequency); l.start(t); l.stop(t + d + 0.05);
+      f1.connect(gn); f2.connect(gn); gn.connect(g.bass);
+    }
+    function dSub(t, f, d) {
+      const gn = ctx.createGain(), ws = ctx.createWaveShaper();
+      ws.curve = dCurve(3);
+      gn.gain.setValueAtTime(0, t); gn.gain.linearRampToValueAtTime(0.55, t + 0.01);
+      gn.gain.setValueAtTime(0.55, t + d - 0.01); gn.gain.linearRampToValueAtTime(0, t + d + 0.02);
+      [["triangle", f], ["sine", f / 2]].forEach(([ty, fr]) => {
+        const o = ctx.createOscillator(); o.type = ty; o.frequency.value = fr; o.connect(ws); o.start(t); o.stop(t + d + 0.05);
+      });
+      ws.connect(gn).connect(g.bass);
+    }
+    // One filter + envelope for the whole chord (3 notes x 3 detuned oscs), into g.pad.
+    function dChord(t, r, d, maj, duty, vol, c0, c1) {
+      const fl = ctx.createBiquadFilter(), gn = ctx.createGain();
+      fl.type = "lowpass"; fl.Q.value = 1;
+      fl.frequency.setValueAtTime(c0, t); fl.frequency.exponentialRampToValueAtTime(c1, t + d);
+      gn.gain.setValueAtTime(0, t); gn.gain.linearRampToValueAtTime(vol, t + 0.08);
+      gn.gain.setValueAtTime(vol, t + d - 0.01); gn.gain.linearRampToValueAtTime(0, t + d + 0.02);
+      [0, maj ? 4 : 3, 7].forEach((iv) => {
+        for (let k = 0; k < 3; k++) {
+          const o = ctx.createOscillator();
+          if (duty) o.setPeriodicWave(dPulse(duty)); else o.type = "sawtooth";
+          o.detune.value = (k - 1) * 16; o.frequency.value = mf(r + iv);
+          o.connect(fl); o.start(t); o.stop(t + d + 0.05);
+        }
+      });
+      fl.connect(gn).connect(g.pad);
+    }
+
+    // i = 0 (long hit) or 1 (short hit); v = voice; w = wobble Hz
+    function dBass(v, t, r, i, bar, d, w) {
+      const song = DUB.song, key = song.key;
+      const mel = v === "saw" ? 0 : song.mel[v][(bar >> 2) & 1][bar % 4][i];
+      if (v === "saw") {
+        dSaw(t, mf(r + 12), d, { det: 24, c: 700, q: 9, vol: 0.3, sub: 0.9, sm: 0.5, wob: w, wd: 650 });
+      } else if (v === "pulse") {
+        const m = key + mel;
+        dSaw(t, mf(m), d, { duty: 0.3, det: 8, c: 900, q: 5, vol: 0.32, sub: 0.6, sm: 1, wob: w / 2, wd: 600, from: DUB.last ? mf(DUB.last) : 0 });
+        DUB.last = m;
+      } else if (v === "fm") {
+        dFm(t, mf(key + 12 + mel), d, w);
+      } else {
+        const m = key + 24 + mel;
+        dVox(t, mf(m), d, w / 2, DUB.last ? mf(DUB.last) : 0);
+        DUB.last = m; dSub(t, mf(r + 12), d);
+      }
+    }
+
+    // ---- Song generation: random key, minor progression, two riff variants per voice ----
+    function dGenMel(prog) {
+      return prog.map((p) => {
+        const rt = (p + 12) % 12, th = DMAJ.includes(p) ? 4 : 3, ct = [rt, (rt + th) % 12, (rt + 7) % 12];
+        return {
+          pulse: [dpick([ct[0], ct[0], ct[1], ct[2]]), dpick(DSC)],
+          fm:    [ct[0], dpick([ct[0], ct[0] + 12, ct[2], dpick(DSC)])],
+          vox:   [dpick(ct), dpick(DSC)]
+        };
+      });
+    }
+    function dGenSong() {
+      const prog = [0, dpick(DPC), dpick(DPC), dpick(DPC)], A = dGenMel(prog), B = dGenMel(prog), mel = {};
+      ["pulse", "fm", "vox"].forEach((v) => { mel[v] = [A.map((x) => x[v]), B.map((x) => x[v])]; });
+      return { key: dpick([27, 28, 29, 30, 31, 32, 33]), prog, mel, wob: [0, 0, 0, 0].map(() => dpick([1, 2, 2, 3, 4])) };
+    }
+
+    // ---- Arrangement: intro -> build -> drop, then another drop, a breakdown, or a new song ----
+    function dubNext() {
+      const f = DUB.force, p = DUB.sg && DUB.sg.k;
+      const seg = (k, b) => ({ k, sec: DSEC[k], bars: b, i: 0 });
+      const fresh = () => { DUB.song = dGenSong(); DUB.fresh = true; if (p && R.on) radioNewTrack(false); };
+      DUB.force = "";
+      if (f === "new" || !p) { fresh(); return seg("intro", dpick([4, 8])); }
+      if (p === "intro" || p === "brk") return seg("build", dpick([4, 4, 8]));
+      if (p === "build") return seg("drop", dpick([8, 8, 16]));
+      const x = Math.random();
+      if (x < 0.25) return seg("drop", 8);
+      if (x < 0.5) return seg("brk", dpick([4, 8]));
+      fresh();
+      return seg("intro", 4 * (1 + Math.floor(Math.random() * 4)));
+    }
+
+    // Called by scheduleStep for every 16th (s = 0..15). Radio "Next Track" forces a new song.
+    function dubStep(s, t) {
+      const sl = stepDur();
+      if (s === 0) {
+        if (R.on && R.skip) { R.skip = false; DUB.force = "new"; }
+        if (!DUB.sg || DUB.force || DUB.sg.i + 1 >= DUB.sg.bars) DUB.sg = dubNext(); else DUB.sg.i++;
+        DUB.bar = DUB.fresh ? 0 : DUB.bar + 1; DUB.fresh = false;
+        if (DUB.sg.i === 0) {
+          if (DUB.sg.k === "build") dRiser(t, sl * 16 * DUB.sg.bars);
+          else if (DUB.sg.k === "drop") dCrash(t);
+        }
+        if (R.on) { R.phase = DNAME[DUB.sg.sec]; radioInfo(); }
+      }
+      const sg = DUB.sg, song = DUB.song, sec = sg.sec, n = sg.bars, i = sg.i, bar = DUB.bar;
+      const p = song.prog[bar % 4], r = song.key + p, voice = S.sel.bassVoice;
+      if (sec === 1 && i === n - 1 && s >= 14) return;           // gap before the drop
+      if (sec !== 2 && s === 0) {
+        const brk = sec === 3;
+        dChord(t, r + 24, 16 * sl, DMAJ.includes(p), DUTY[voice], brk ? 0.1 : 0.06,
+               sec === 1 ? 500 : 250, sec === 1 ? 5000 : brk ? 3500 : 1200);
+      }
+      if (sec === 1) {                                           // build: kicks thin out, snare roll speeds up
+        const b = i - (n - 4);
+        if (b < 0) { if (s % 4 === 0) dKick(t); if (s === 8) dSnare(t, 0.4); return; }
+        if (b < 2 && s % 4 === 0) dKick(t);
+        if (s % [4, 2, 1, 1][b] === 0) dSnare(t, 0.12 + b * 0.1 + s / 160);
+        return;
+      }
+      if (sec === 3) {                                           // breakdown: vowel lead only
+        if (s === 0 || s === 8) dBass("vox", t, r, s ? 1 : 0, bar, sl * 7.6, 0);
+        return;
+      }
+      if (sec === 0) {                                           // intro: sparse drums
+        if (s === 0) dKick(t); if (s === 8) dSnare(t, 0.5); if (s % 4 === 2) dHat(t, 0, 0.25);
+        return;
+      }
+      if (s === 0 || s === 10) dKick(t);                         // drop
+      if (s === 8) { dSnare(t, 0.7); dClap(t, 0.5); }
+      if (s % 2 === 0) dHat(t, s % 8 === 6, 0.22);
+      if (s === 0 || s === 10) {
+        const k = s ? 1 : 0, bh = S.bpm / 60, fill = i === n - 1;
+        dBass(voice, t, r, k, bar, k ? sl * 5.5 : sl * 7.6, k ? bh * 4 : bh * song.wob[bar % 4] * (fill ? 2 : 1));
+      }
+		  }
+	  
+    // ---------------------------------------------------------------
     // Scheduler (16 steps per bar, 4/4)
     // ---------------------------------------------------------------
     function drumsChill(s, jt) {
