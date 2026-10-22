@@ -1397,6 +1397,7 @@
       buildGraph();
       step = 0; chordIdx = 0; currentChord = null; lastMelodyNote = null; arpFreq = null;
       resetVariation();
+	  DUB.sg = null; DUB.song = null; DUB.force = ""; DUB.last = 0; DUB.fresh = false;
       if (R.on) { R.n = 0; R.skip = false; radioNewTrack(true); }
       nextTime = ctx.currentTime + 0.1;
       playing = true;
