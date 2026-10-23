@@ -164,7 +164,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261023-1247</h2>
+    <h2 id="ver">261023-1255</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -1166,6 +1166,7 @@
         { id: "bassVoice", label: "Bass", def: "saw",
           options: [["saw", "Saw (Classic Wub)"], ["square", "Square (Hollow)"], ["growl", "Growl (Thick Stack)"],
                     ["reese", "Reese (Wide, Phasing)"], ["fm", "FM Metal (Talking)"], ["mixed", "Mixed (Changes by Phrase)"]] },
+          radio: ["saw", "square", "growl", "reese"] },
         { id: "bassPattern", label: "Bassline", def: "half",
           options: [["half", "Half-Time Hold"], ["hold", "Long Drone"], ["stutter", "Stutter"]] },
         { id: "padShape", label: "Pad", def: "super",
@@ -1180,7 +1181,7 @@
       saw:    [["sawtooth", 1, -12], ["sawtooth", 1, 12]],
       square: [["square", 1, -8], ["square", 1, 8]],
       growl:  [["sawtooth", 1, -18], ["sawtooth", 1, 0], ["sawtooth", 1, 18], ["sawtooth", 2, 0]],
-  reese:  [["sawtooth", 1, -28], ["sawtooth", 1, -9], ["sawtooth", 1, 9], ["sawtooth", 1, 28]]   // fm is built separately (dub2Fm)
+  	  reese:  [["sawtooth", 1, -28], ["sawtooth", 1, -9], ["sawtooth", 1, 9], ["sawtooth", 1, 28]]   // fm is built separately (dub2Fm)
     };
     // Variation: [drop lengths in bars, chance the end of a drop goes through a break first]. Off = endless drop.
     const DUB2_VAR = { low: [[24, 32, 32], 0.3], med: [[16, 24, 32], 0.5], high: [[16, 16, 24], 0.7] };
