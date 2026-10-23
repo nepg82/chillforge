@@ -1,4 +1,4 @@
-const CACHE_NAME = "chillforge-cache-v2.1.32";
+const CACHE_NAME = "chillforge-cache-v2.1.33";
 
 const APP_SHELL = [
   "./",
