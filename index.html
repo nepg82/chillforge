@@ -164,7 +164,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261023-0712</h2>
+    <h2 id="ver">261023-1247</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -485,10 +485,7 @@
 	const snap = () => "play=" + playing + " ctx=" + (ctx ? ctx.state : "-") +
 	  " el=" + (silentEl ? (silentEl.paused ? "paused" : "playing") : "-") + " vis=" + document.visibilityState;
     
-    let batt = null;
-	try { navigator.getBattery().then((b) => { batt = b; }).catch(() => {}); } catch (e) {}
-	const diag = () => " mem=" + (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) + "MB" : "?") +
-	  " bat=" + (batt ? Math.round(batt.level * 100) + (batt.charging ? "+" : "%") : "?") + " w=" + waitCount;
+	const diag = () => " mem=" + (performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) + "MB" : "?") + " w=" + waitCount;
 	function alive(why) {
 	  try { localStorage.setItem("chillforge-alive", JSON.stringify({ t: Date.now(), p: playing, w: why })); } catch (e) {}
 	}
@@ -1120,8 +1117,8 @@
       o.start(t);
       o.stop(t + 0.12);
     }
-    	
-    // ---------------------------------------------------------------
+
+    // ---------------------------------------------------------------// ---------------------------------------------------------------
     // Dubstep 2 (native). Reuses Chillforge's own pieces: the shared bass path (bassIn -> drive ->
     // sweeping filter), playChord + supersaw pad, hard kick / gated snare / hats, the progression
     // picker, and Radio's layered intros/outros. New here: a half-time groove, a wobble LFO,
@@ -1167,7 +1164,8 @@
       ],
       selects: [
         { id: "bassVoice", label: "Bass", def: "saw",
-          options: [["saw", "Saw (Classic Wub)"], ["square", "Square (Hollow)"], ["growl", "Growl (Thick Stack)"]] },
+          options: [["saw", "Saw (Classic Wub)"], ["square", "Square (Hollow)"], ["growl", "Growl (Thick Stack)"],
+                    ["reese", "Reese (Wide, Phasing)"], ["fm", "FM Metal (Talking)"], ["mixed", "Mixed (Changes by Phrase)"]] },
         { id: "bassPattern", label: "Bassline", def: "half",
           options: [["half", "Half-Time Hold"], ["hold", "Long Drone"], ["stutter", "Stutter"]] },
         { id: "padShape", label: "Pad", def: "super",
@@ -1181,11 +1179,12 @@
     const DUB2_VOICES = {                                                                               // [wave, freq multiplier, detune cents]
       saw:    [["sawtooth", 1, -12], ["sawtooth", 1, 12]],
       square: [["square", 1, -8], ["square", 1, 8]],
-      growl:  [["sawtooth", 1, -18], ["sawtooth", 1, 0], ["sawtooth", 1, 18], ["sawtooth", 2, 0]]
+      growl:  [["sawtooth", 1, -18], ["sawtooth", 1, 0], ["sawtooth", 1, 18], ["sawtooth", 2, 0]],
+  reese:  [["sawtooth", 1, -28], ["sawtooth", 1, -9], ["sawtooth", 1, 9], ["sawtooth", 1, 28]]   // fm is built separately (dub2Fm)
     };
     // Variation: [drop lengths in bars, chance the end of a drop goes through a break first]. Off = endless drop.
     const DUB2_VAR = { low: [[24, 32, 32], 0.3], med: [[16, 24, 32], 0.5], high: [[16, 16, 24], 0.7] };
-    const D2 = { g: null, ph: null, left: 0, n: 0, wm: 4, trk: -1, rb: null };
+    const D2 = { g: null, ph: null, left: 0, n: 0, wm: 4, trk: -1, rb: null, mv: "saw" };
     const d2p = (a) => a[Math.floor(Math.random() * a.length)];
 
     // Noise sweep (crash, downlifter) into the drums channel.
@@ -1214,10 +1213,24 @@
       o.connect(gn).connect(g.bassFilter.frequency); o.start(t); o.stop(t + bar + 0.05);
     }
 
+    // FM voice: sine carrier with a sine modulator at 2x; the modulation index falls across the note (a "talking" edge).
+    function dub2Fm(t, dur, f, subM, gn) {
+      const c = ctx.createOscillator(), m = ctx.createOscillator(), mg = ctx.createGain(), sb = ctx.createOscillator();
+      c.frequency.value = f; m.frequency.value = f * 2;
+      mg.gain.setValueAtTime(f * 4, t); mg.gain.exponentialRampToValueAtTime(f * 1.2, t + dur);
+      m.connect(mg).connect(c.frequency);
+      sb.frequency.value = f * subM;
+      c.connect(gn); sb.connect(gn);
+      [c, m, sb].forEach((o) => { o.start(t); o.stop(t + dur + 0.3); });
+    }
+
     function dub2Bass(t, len) {
-      const f = noteFreq(currentChord[0]), dur = len * stepDur() * 0.92;
-      const list = DUB2_VOICES[S.sel.bassVoice].concat([["sine", f / 2 < 40 ? 1 : 0.5, 0]]);   // sub an octave down (not below ~40 Hz)
-      const gn = ctx.createGain(), peak = 0.5 / list.length;
+      let v = S.sel.bassVoice;
+      if (v === "mixed") v = D2.mv;
+      const fm = v === "fm", f = noteFreq(currentChord[0]), dur = len * stepDur() * 0.92;
+      const subM = f / 2 < 40 ? 1 : 0.5;                              // sub an octave down (not below ~40 Hz)
+      const list = fm ? [] : DUB2_VOICES[v].concat([["sine", subM, 0]]);
+      const gn = ctx.createGain(), peak = fm ? 0.22 : 0.5 / list.length;
       gn.gain.setValueAtTime(0.0001, t); gn.gain.linearRampToValueAtTime(peak, t + 0.008);
       gn.gain.setTargetAtTime(0, t + dur, 0.04);
       list.forEach(([ty, m, dt]) => {
@@ -1225,6 +1238,7 @@
         o.type = ty; o.frequency.value = f * m; o.detune.value = dt;
         o.connect(gn); o.start(t); o.stop(t + dur + 0.3);
       });
+      if (fm) dub2Fm(t, dur, f, subM, gn);
       gn.connect(g.bassIn);
     }
 
@@ -1239,7 +1253,7 @@
         return;
       }
       if (s === 0) kickHard(jt, 1); else if (s === 10 && Math.random() < 0.6) kickHard(jt, 0.8);
-      if (s === 8) gatedSnare(jt, rand(0.5, 0.65));                     // half-time: snare on beat 3
+      if (s === 8) gatedSnare(jt, rand(0.9, 1));                     // half-time: snare on beat 3
       if (s % 4 === 2) noiseHit(jt, g.hatHP, 0.14, 0.11);
       else if (s % 4 === 0) hat(jt, 0.45);
       else if (Math.random() < 0.5) hat(jt, rand(0.15, 0.3));
@@ -1256,11 +1270,11 @@
       const go = (ph, n) => { D2.ph = ph; D2.left = n; };
       const build = (n) => { go("build", n); if (loud) dub2Riser(t, n * 16 * sd); };
       if (!old) { if (R.on) go("drop", d2p(V2 ? V2[0] : [16])); else build(4); }   // Radio's layered intro replaces the build
-      else if (old === "build") { go("drop", d2p(V2 ? V2[0] : [16])); if (loud) dub2Sweep(t, 1.6, "highpass", 5000, 3000, 0.5); }
+      else if (old === "build") { go("drop", d2p(V2 ? V2[0] : [16])); if (loud && Math.random() < 0.75) dub2Sweep(t, rand(1.0, 2.2), "highpass", rand(4000, 7000), rand(2000, 3500), rand(0.35, 0.55)); }
       else if (old === "break") build(d2p([4, 8]));
       else if (!V2) go("drop", 16);
       else {
-        if (loud) dub2Sweep(t, 1.4, "bandpass", 5000, 250, 0.35);
+        if (loud && Math.random() < 0.66) dub2Sweep(t, rand(1.0, 1.8), "bandpass", rand(4000, 6500), rand(200, 400), rand(0.25, 0.4));
         if (Math.random() < V2[1]) go("break", 8); else build(4);
       }
     }
@@ -1271,7 +1285,7 @@
         if (D2.g !== g || (R.on && D2.trk !== R.n)) dub2Reset(t);    // new graph or new Radio track: start fresh
         if (D2.left <= 0) dub2Next(t);
         D2.left--;                                                   // bars remaining after this one
-        if ((D2.n++ & 3) === 0) D2.wm = d2p([2, 4, 4, 8, 8, 12]);    // wobble rate re-rolls each phrase (cycles per bar)
+        if ((D2.n++ & 3) === 0) { D2.wm = d2p([2, 4, 4, 8, 8, 12]); D2.mv = d2p(["saw", "square", "growl", "reese", "fm"]); }    // wobble rate re-rolls each phrase (cycles per bar)
         playChord(t, !muted("pad"));
         if (D2.ph === "drop" && !muted("bass")) dub2Lfo(t);
       }
@@ -1281,7 +1295,7 @@
         const len = DUB2_PAT[S.sel.bassPattern][s];
         if (len) dub2Bass(t, len);
       }
-    }	
+    }
     	  
     // ---------------------------------------------------------------
     // Scheduler (16 steps per bar, 4/4)
