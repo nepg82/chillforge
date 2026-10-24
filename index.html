@@ -1248,14 +1248,14 @@
       if (D2.ph === "build") {
         if (L === 0 && s >= 14) return;                              // gap before the drop
         const bi = L <= 3 ? 3 - L : -1;                              // last 4 bars: kicks thin out, snare roll speeds up
-        if (bi < 0) { if (s % 4 === 0) kickHard(jt, 0.8); if (s === 8) snare(jt, 0.5); return; }
+        if (bi < 0) { if (s % 4 === 0) kickHard(jt, 0.8); if (s === 8) snare(jt, 0.35); return; }
         if (bi < 2 && s % 4 === 0) kickHard(jt, 0.8);
-        if (s % [4, 2, 1, 1][bi] === 0) snare(jt, 0.25 + bi * 0.15 + s / 80);
+        if (s % [4, 2, 1, 1][bi] === 0) snare(jt, (0.25 + bi * 0.15 + s / 80) * 0.6);
         return;
       }
       if (s === 0) kickHard(jt, 1); else if (s === 10 && Math.random() < 0.6) kickHard(jt, 0.8);
       if (s === 8) gatedSnare(jt, rand(0.5, 0.65));                     // half-time: snare on beat 3
-      if (s % 4 === 2) noiseHit(jt, g.hatHP, 0.14, 0.11);
+      if (s % 4 === 2) noiseHit(jt, g.hatHP, 0.14, 0.11);  //try 0.9 in place of 0.14
       else if (s % 4 === 0) hat(jt, 0.45);
       else if (Math.random() < 0.5) hat(jt, rand(0.15, 0.3));
     }
@@ -1271,11 +1271,11 @@
       const go = (ph, n) => { D2.ph = ph; D2.left = n; };
       const build = (n) => { go("build", n); if (loud) dub2Riser(t, n * 16 * sd); };
       if (!old) { if (R.on) go("drop", d2p(V2 ? V2[0] : [16])); else build(4); }   // Radio's layered intro replaces the build
-      else if (old === "build") { go("drop", d2p(V2 ? V2[0] : [16])); if (loud && Math.random() < 0.75) dub2Sweep(t, rand(1.0, 2.2), "highpass", rand(4000, 7000), rand(2000, 3500), rand(0.35, 0.55)); }
+      else if (old === "build") { go("drop", d2p(V2 ? V2[0] : [16])); if (loud && Math.random() < 0.75) dub2Sweep(t, rand(1.0, 2.2), "bandpass", rand(2200, 3500), rand(900, 1600), rand(0.2, 0.32)); }
       else if (old === "break") build(d2p([4, 8]));
       else if (!V2) go("drop", 16);
       else {
-        if (loud && Math.random() < 0.66) dub2Sweep(t, rand(1.0, 1.8), "bandpass", rand(4000, 6500), rand(200, 400), rand(0.25, 0.4));
+        if (loud && Math.random() < 0.66) dub2Sweep(t, rand(1.0, 1.8), "bandpass", rand(2500, 4000), rand(200, 400), rand(0.15, 0.25));
         if (Math.random() < V2[1]) go("break", 8); else build(4);
       }
     }
