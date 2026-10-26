@@ -164,7 +164,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261025-1650</h2>
+    <h2 id="ver">261026-1447</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -1197,15 +1197,20 @@
       s.connect(fl).connect(gn).connect(g.drums); s.start(t); s.stop(t + d + 0.02);
     }
     // Riser goes through one gain node so a track change can cut it off.
-    function dub2Riser(t, d) {
-      const bus = ctx.createGain(), s = ctx.createBufferSource(), fl = ctx.createBiquadFilter(), gn = ctx.createGain();
-      bus.connect(g.drums); D2.rb = bus;
-      s.buffer = noiseBuf; s.loop = true; fl.type = "bandpass"; fl.Q.value = 1.5;
-      fl.frequency.setValueAtTime(250, t); fl.frequency.exponentialRampToValueAtTime(9000, t + d);
-      gn.gain.setValueAtTime(0, t); gn.gain.linearRampToValueAtTime(0.5, t + d - 0.05); gn.gain.linearRampToValueAtTime(0, t + d);
-      s.connect(fl).connect(gn).connect(bus); s.start(t); s.stop(t + d + 0.05);
-    }
-
+	function dub2Riser(t, d) {
+	  const bus = ctx.createGain(), s = ctx.createBufferSource(),
+	        fl = ctx.createBiquadFilter(), lp = ctx.createBiquadFilter(), gn = ctx.createGain();
+	  bus.connect(g.drums); D2.rb = bus;
+	  s.buffer = noiseBuf; s.loop = true;
+	  fl.type = "bandpass"; fl.Q.value = 0.8;                       // was 1.5: broader, less whistly
+	  fl.frequency.setValueAtTime(200, t);
+	  fl.frequency.exponentialRampToValueAtTime(3500, t + d);       // was 9000
+	  lp.type = "lowpass"; lp.frequency.value = 4500; lp.Q.value = 0.5;   // hard ceiling on the hiss
+	  gn.gain.setValueAtTime(0, t);
+	  gn.gain.linearRampToValueAtTime(0.2, t + d - 0.05);           // was 0.5
+	  gn.gain.linearRampToValueAtTime(0, t + d);
+	  s.connect(fl).connect(lp).connect(gn).connect(bus); s.start(t); s.stop(t + d + 0.05);
+	}
     // Wobble: one sine LFO per bar on the shared bass filter. Whole cycles per bar, so it loops seamlessly,
     // and the depth (280 Hz) can never pull the cutoff below ~100 Hz (the sweep base never goes under 380).
     function dub2Lfo(t) {
@@ -1254,7 +1259,7 @@
         return;
       }
       if (s === 0) kickHard(jt, 1); else if (s === 10 && Math.random() < 0.6) kickHard(jt, 0.8);
-      if (s === 8) gatedSnare(jt, rand(0.5, 0.65));                     // half-time: snare on beat 3
+	  if (s === 8) snare(jt, rand(0.7, 1));		// half-time: snare on beat 3
       if (s % 4 === 2) noiseHit(jt, g.hatHP, 0.01, 0.05);  //try 0.09 in place of 0.14
       else if (s % 4 === 0) hat(jt, 0.45);
       else if (Math.random() < 0.5) hat(jt, rand(0.15, 0.3));
