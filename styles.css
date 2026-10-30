@@ -1,0 +1,146 @@
+:root {
+	--bg: #1e1e24;
+    --card: #2b2b36;
+    --accent: #d4a373;
+    --text: #f4f4f6;
+    --muted: #a0a0b0;
+    --border: #3f3f4e;
+}
+
+body {
+	background-color: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+    margin: 0;
+    padding: 10px 20px 20px;
+    box-sizing: border-box;
+}
+
+    .container {
+      background-color: var(--card);
+      padding: 24px;
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      width: 100%;
+      max-width: 440px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      font-weight: 600;
+      text-align: center;
+      color: var(--accent);
+      letter-spacing: 1px;
+    }
+    h2 {
+      margin: 0;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-align: center;
+      color: var(--accent);
+      letter-spacing: 1px;
+    }
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 4px;
+      margin-top: 6px;
+    }
+    .control-group { display: flex; flex-direction: column; gap: 6px; }
+    .control-group[hidden] { display: none; }
+    #controls { display: flex; flex-direction: column; gap: 8px; }
+    label {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    select {
+      width: 100%;
+      height: 44px;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0 10px;
+      font-size: 0.9rem;
+      outline: none;
+      box-sizing: border-box;
+    }
+    button {
+      background-color: var(--accent);
+      color: #1a1a1a;
+      border: none;
+      padding: 12px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      touch-action: manipulation;
+    }
+    button:hover { opacity: 0.9; }
+    button:active { transform: scale(0.98); }
+    button.playing { background-color: #e76f51; }
+
+    /* Compact stepper / select rows: label | control */
+    .row {
+      display: grid;
+      grid-template-columns: 4.6rem 44px 1fr 44px;
+      gap: 8px;
+      align-items: center;
+    }
+    .row.sel { grid-template-columns: 4.6rem 1fr; }
+    .row .lbl { font-size: 0.85rem; font-weight: 600; text-align: right; }
+
+    /* Two-column stepper grid: label above, [-] value [+] below */
+    .cells {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px 14px;
+    }
+    .cell { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .cell .lbl { font-size: 0.8rem; font-weight: 600; text-align: center; color: var(--muted); }
+    .ctl { display: grid; grid-template-columns: 44px 1fr 44px; gap: 6px; }
+    .divider { grid-column: 1 / -1; border-top: 1px solid var(--border); margin: 4px 0 2px; }
+    .step {
+      height: 44px;
+      padding: 0;
+      font-size: 1.4rem;
+      line-height: 1;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .step:disabled { opacity: 0.3; cursor: default; }
+    .val {
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 0.95rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .radiorow { display: flex; gap: 8px; }
+	.radiorow button { flex: 1; }
+	.radiorow [hidden] { display: none; }
+	button.alt { background: var(--bg); color: var(--accent); border: 1px solid var(--border); }
+	button.alt.on { background: var(--accent); color: #1a1a1a; }
+	#radioInfo { font-size: 0.75rem; color: var(--muted); text-align: center; min-height: 1em; }
+	
+	#dbg { font-size: .65rem; color: var(--muted); white-space: pre-wrap; max-height: 40vh; overflow: auto; margin: 0; }
