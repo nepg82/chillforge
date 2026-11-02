@@ -18,7 +18,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261030-1000</h2>
+    <h2 id="ver">261102-1200</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -205,6 +205,11 @@
     // ---------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------
+    // Random source. In the live app this is just Math.random. The trace harness (trace.js)
+    // swaps in a seeded generator so a run can be replayed exactly. Every random choice in the
+    // app must go through rng(), never Math.random() directly.
+    let RNG = Math.random;
+    const rng = () => RNG();
     const SEMI = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
     function noteFreq(name) {
       const m = /^([A-G])([#b]?)(-?\d)$/.exec(name);
@@ -233,12 +238,12 @@
       const len = Math.floor(ctx.sampleRate * sec), b = ctx.createBuffer(2, len, ctx.sampleRate);
       for (let c = 0; c < 2; c++) {
         const d = b.getChannelData(c);
-        for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+        for (let i = 0; i < len; i++) d[i] = (rng() * 2 - 1) * Math.pow(1 - i / len, decay);
       }
       return b;
     }
     const dbToGain = (db) => (db <= VOL_MIN ? 0 : Math.pow(10, db / 20));
-    const rand = (a, b) => a + Math.random() * (b - a);
+    const rand = (a, b) => a + rng() * (b - a);
     const stepDur = () => 60 / S.bpm / 4;
 
     // Scheduler tick from a Worker so it isn't throttled in background tabs.
@@ -301,7 +306,7 @@
       const len = ctx.sampleRate * 3;
       noiseBuf = ctx.createBuffer(1, len, ctx.sampleRate);
       const d = noiseBuf.getChannelData(0);
-      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      for (let i = 0; i < len; i++) d[i] = rng() * 2 - 1;
 
       timer = makeTimer(tick, TICK_MS);
       ctx.onstatechange = () => {
@@ -389,7 +394,7 @@
       const list = VAR_SCENES[key];
       let total = 0;
       list.forEach((sc) => { total += sc.w; });
-      let r = Math.random() * total;
+      let r = rng() * total;
       for (const sc of list) {
         r -= sc.w;
         if (r < 0) return sc.mute;
@@ -410,9 +415,9 @@
       const phraseLen = PROGRESSIONS[S.prog].chords.length;
       if (!V.mute && chordIdx % phraseLen === 0) {
         if (V.skip > 0) V.skip--;
-        else if (Math.random() < chance) {
+        else if (rng() < chance) {
           V.mute = pickScene(st.scenes);
-          V.bars = VAR_BARS[Math.floor(Math.random() * VAR_BARS.length)];
+          V.bars = VAR_BARS[Math.floor(rng() * VAR_BARS.length)];
         }
       }
     }
@@ -427,16 +432,16 @@
 	function radioPlan() {
 	  const ids = STYLES[styleKey].channels.map((c) => c.id);
 	  const P = PROGRESSIONS[S.prog].chords.length;
-	  const shuf = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
-	  const sched = (ord) => { let at = 0; const list = ord.map((ch) => { const e = { ch, at }; at += RADIO_STEP_CHOICES[Math.floor(Math.random() * RADIO_STEP_CHOICES.length)]; return e; }); return { list, end: at }; };
+	  const shuf = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+	  const sched = (ord) => { let at = 0; const list = ord.map((ch) => { const e = { ch, at }; at += RADIO_STEP_CHOICES[Math.floor(rng() * RADIO_STEP_CHOICES.length)]; return e; }); return { list, end: at }; };
 
-	  const lastIn = Math.random() < 0.5 ? "pad" : "drums";      // last to enter
+	  const lastIn = rng() < 0.5 ? "pad" : "drums";      // last to enter
 	  const inOrd = shuf(ids.filter((c) => c !== lastIn));
 	  if (inOrd[0] === "drums") { const j = inOrd.length - 1; [inOrd[0], inOrd[j]] = [inOrd[j], inOrd[0]]; }
 	  inOrd.push(lastIn);
 
 	  const outOrd = shuf(ids), L = outOrd.length - 1;          // drums never the last one left
-	  if (outOrd[L] === "drums") { const j = Math.floor(Math.random() * L); [outOrd[j], outOrd[L]] = [outOrd[L], outOrd[j]]; }
+	  if (outOrd[L] === "drums") { const j = Math.floor(rng() * L); [outOrd[j], outOrd[L]] = [outOrd[L], outOrd[j]]; }
 
 	  const si = sched(inOrd), so = sched(outOrd), outBars = so.list[L].at;
 	  R.intro = si.list; R.introBars = si.end; R.out = so.list;
@@ -450,13 +455,13 @@
 	  const st = STYLES[styleKey];
 	  if (!first) {
 	    const ps = st.progs.filter((p) => p !== S.prog);
-	    if (ps.length) S.prog = ps[Math.floor(Math.random() * ps.length)];
-	    const up = Math.random() < clamp(0.5 + (st.bpm.def - S.bpm) / (st.bpm.max - st.bpm.min), 0.1, 0.9);
+	    if (ps.length) S.prog = ps[Math.floor(rng() * ps.length)];
+	    const up = rng() < clamp(0.5 + (st.bpm.def - S.bpm) / (st.bpm.max - st.bpm.min), 0.1, 0.9);
 	    S.bpm = clamp(S.bpm + (up ? 1 : -1) * Math.round(rand(2, 5)), st.bpm.min, st.bpm.max);
 	    st.selects.forEach((s) => {
 	      if (s.id === "variation") return;
 	      const pool = (s.radio || s.options.map((o) => o[0])).filter((v) => v !== S.sel[s.id]);
-	      if (pool.length) S.sel[s.id] = pool[Math.floor(Math.random() * pool.length)];
+	      if (pool.length) S.sel[s.id] = pool[Math.floor(rng() * pool.length)];
 	    });
 	    if (g) g.delay.delayTime.setTargetAtTime(45 / S.bpm, ctx.currentTime, 0.05);
 	  }
@@ -553,12 +558,12 @@
     function playMelody(t) {
       if (!currentChord) return;
       let note;
-      do { note = currentChord[Math.floor(Math.random() * currentChord.length)]; }
+      do { note = currentChord[Math.floor(rng() * currentChord.length)]; }
       while (note === lastMelodyNote && currentChord.length > 1);
       lastMelodyNote = note;
 
       const shape = S.sel.melodyShape;
-      const units = [1, 1, 1, 2, 2, 3, 4][Math.floor(Math.random() * 7)];
+      const units = [1, 1, 1, 2, 2, 3, 4][Math.floor(rng() * 7)];
       const dur = units * stepDur();
       const peak = 0.2 * SHAPE_LEVEL[shape];
 
@@ -582,7 +587,7 @@
       gn.gain.setValueAtTime(level, t);
       gn.gain.exponentialRampToValueAtTime(0.001, t + decay);
       s.connect(gn).connect(dest);
-      s.start(t, Math.random() * 0.8);
+      s.start(t, rng() * 0.8);
       s.stop(t + decay + 0.02);
     }
 
@@ -623,13 +628,13 @@
     // ---------------------------------------------------------------
     function drumsChill(s, jt) {
       if (s === 0) kick(jt, 1);
-      else if (s === 6 && Math.random() < 0.4) kick(jt, 0.8);
-      else if (s === 10 && Math.random() < 0.35) kick(jt, 0.75);
+      else if (s === 6 && rng() < 0.4) kick(jt, 0.8);
+      else if (s === 10 && rng() < 0.35) kick(jt, 0.75);
 
       if (s === 4 || s === 12) snare(jt, rand(0.85, 1));
 
       if (s % 2 === 0) hat(jt, s % 4 === 2 ? rand(0.9, 1) : rand(0.4, 0.6));
-      else if (Math.random() < 0.15) hat(jt, 0.3);
+      else if (rng() < 0.15) hat(jt, 0.3);
     }
 
     const DRUMS = { chill: drumsChill };
@@ -645,7 +650,7 @@
 
       if (!muted("drums")) DRUMS[st.drums](s, t + rand(-st.jitter, st.jitter));
 
-	  if (s % 2 === 0 && !muted("melody") && Math.random() < MELODY_DENSITY) playMelody(t);
+	  if (s % 2 === 0 && !muted("melody") && rng() < MELODY_DENSITY) playMelody(t);
 
     }
 
