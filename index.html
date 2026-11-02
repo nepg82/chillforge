@@ -18,7 +18,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261102-1806</h2>
+    <h2 id="ver">261102-1845</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -114,9 +114,10 @@
         // ===========================================================
         // RECORD: Chillwave
         // Everything that makes this style sound the way it does lives in this block. The engine
-        // reaches it only through the descriptor returned at the bottom. Anything the record needs
-        // from the engine comes in through `a` (the engine api): audio context, graph nodes,
-        // current settings, random numbers, tempo, and note/shape helpers.
+        // reaches it only through the descriptor built below (buildGraph, onTempo, voices, patterns,
+        // reset, plus the data fields). Anything the record needs from the engine comes in through
+        // `a` (the engine api): audio context, its own graph nodes, current settings, random
+        // numbers, tempo, and note/shape helpers. The record never touches transport or timers.
         // ===========================================================
 
         let lastMelodyNote = null;                  // private to this record
@@ -223,7 +224,7 @@
           o.stop(t + dur + 0.9);
         }
 
-        return {
+        const rec = {
           label: "Chillwave",
           bpm: { min: 55, max: 95, def: 83 },
           swing: 0.16,                        // delay on off-16ths, fraction of a step
@@ -245,10 +246,57 @@
           ],
 
           // ---- what the engine calls -------------------------------
+
+          // Build this style's audio nodes and feed them into the engine's master bus.
+          // Must return a map with a gain node for every id in `channels` (the engine uses
+          // those for the mixer); any other nodes the voices need can ride along in it.
+          buildGraph(a, bus) {
+            const ctx = a.ctx;
+            const n = {};
+
+            n.drums = ctx.createGain();  n.drums.connect(bus);
+            n.pad = ctx.createGain();    n.pad.connect(bus);
+            n.melody = ctx.createGain(); n.melody.connect(bus);
+
+            // Pad tone shaping
+            n.padFilter = ctx.createBiquadFilter();
+            n.padFilter.type = "lowpass";
+            n.padFilter.frequency.value = rec.padCutoff;
+            n.padFilter.connect(n.pad);
+
+            // Shared drum filters
+            n.snareBP = ctx.createBiquadFilter();
+            n.snareBP.type = "bandpass"; n.snareBP.frequency.value = 2200; n.snareBP.Q.value = 0.7;
+            n.snareBP.connect(n.drums);
+            n.hatHP = ctx.createBiquadFilter();
+            n.hatHP.type = "highpass"; n.hatHP.frequency.value = 7500;
+            n.hatHP.connect(n.drums);
+
+            // Melody echo (dotted eighth)
+            n.delay = ctx.createDelay(2);
+            n.delay.delayTime.value = 45 / a.S.bpm;
+            const send = ctx.createGain(); send.gain.value = rec.echo;
+            const fb = ctx.createGain();   fb.gain.value = 0.38;
+            const dLP = ctx.createBiquadFilter();
+            dLP.type = "lowpass"; dLP.frequency.value = 1800;
+            if (n[rec.lead]) n[rec.lead].connect(send).connect(n.delay).connect(dLP);
+            dLP.connect(fb).connect(n.delay);
+            dLP.connect(bus);
+
+            return n;
+          },
+
+          // Tempo changed while playing: re-sync anything tied to the beat (here, the echo).
+          onTempo(a) {
+            a.nodes.delay.delayTime.setTargetAtTime(45 / a.S.bpm, a.ctx.currentTime, 0.05);
+          },
+
           voices: { pad, melody },
           patterns: { chill: drumsChill },
           reset() { lastMelodyNote = null; }        // engine calls this on start / style switch
         };
+
+        return rec;
       })()
     };
 
@@ -369,7 +417,7 @@
     // graph and settings and never holds a stale copy across a stop/start or a style switch.
     const api = {
       get ctx() { return ctx; },
-      get nodes() { return g; },
+      get nodes() { return g ? g.nodes : null; },
       get S() { return S; },
       get noise() { return noiseBuf; },
       rng, rand, stepDur, noteFreq, applyShape,
@@ -458,34 +506,8 @@
       n.filter.frequency.value = CUTOFF * st.cutoffMul;
       n.filter.connect(n.comp).connect(n.out).connect(ctx.destination);
 
-      n.drums = ctx.createGain();  n.drums.connect(n.filter);
-      n.pad = ctx.createGain();    n.pad.connect(n.filter);
-      n.melody = ctx.createGain(); n.melody.connect(n.filter);
-
-      // Pad tone shaping
-      n.padFilter = ctx.createBiquadFilter();
-      n.padFilter.type = "lowpass";
-      n.padFilter.frequency.value = st.padCutoff;
-      n.padFilter.connect(n.pad);
-
-      // Shared drum filters
-      n.snareBP = ctx.createBiquadFilter();
-      n.snareBP.type = "bandpass"; n.snareBP.frequency.value = 2200; n.snareBP.Q.value = 0.7;
-      n.snareBP.connect(n.drums);
-      n.hatHP = ctx.createBiquadFilter();
-      n.hatHP.type = "highpass"; n.hatHP.frequency.value = 7500;
-      n.hatHP.connect(n.drums);
-
-      // Melody echo (dotted eighth)
-      n.delay = ctx.createDelay(2);
-      n.delay.delayTime.value = 45 / S.bpm;
-      const send = ctx.createGain(); send.gain.value = st.echo;
-      const fb = ctx.createGain();   fb.gain.value = 0.38;
-      const dLP = ctx.createBiquadFilter();
-      dLP.type = "lowpass"; dLP.frequency.value = 1800;
-      if (n[st.lead]) n[st.lead].connect(send).connect(n.delay).connect(dLP);
-      dLP.connect(fb).connect(n.delay);
-      dLP.connect(n.filter);
+      // The style builds its own nodes and feeds them into the master bus (n.filter).
+      n.nodes = st.buildGraph(api, n.filter);
 
       g = n;
       applyMixer(true);
@@ -503,11 +525,17 @@
       const t = ctx.currentTime, tc = instant ? 0.001 : 0.03;
 	  g.out.gain.setTargetAtTime(yielded ? 0 : dbToGain(S.vol.master), t, tc);
       STYLES[styleKey].channels.forEach((c) => {
-        const node = g[c.id];
+        const node = g.nodes[c.id];
         if (!node) return;
         node.gain.setTargetAtTime(dbToGain(S.vol[c.id]), t, tc);
       });
       g.filter.frequency.setTargetAtTime(CUTOFF * STYLES[styleKey].cutoffMul, t, instant ? 0.001 : 0.15);
+    }
+
+    // Tempo changed while playing: let the style re-sync anything tied to the beat.
+    function tempoChanged() {
+      const st = STYLES[styleKey];
+      if (g && st.onTempo) st.onTempo(api);
     }
 
     // ---------------------------------------------------------------
@@ -593,7 +621,7 @@
 	      const pool = (s.radio || s.options.map((o) => o[0])).filter((v) => v !== S.sel[s.id]);
 	      if (pool.length) S.sel[s.id] = pool[Math.floor(rng() * pool.length)];
 	    });
-	    if (g) g.delay.delayTime.setTargetAtTime(45 / S.bpm, ctx.currentTime, 0.05);
+	    tempoChanged();
 	  }
 	  R.n++; chordIdx = 0;
 	  radioPlan();
@@ -827,7 +855,7 @@
 
       cells.appendChild(stepperRow("Tempo", () => S.bpm, (v) => {
         S.bpm = v;
-        if (g) g.delay.delayTime.setTargetAtTime(45 / S.bpm, ctx.currentTime, 0.05);
+        tempoChanged();
       }, st.bpm.min, st.bpm.max, String));
 
       const volCell = (c, label) => stepperRow(label || c.label, () => S.vol[c.id], (v) => {
