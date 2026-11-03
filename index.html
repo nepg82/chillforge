@@ -18,7 +18,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261103-0715</h2>
+    <h2 id="ver">261103-0758</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -46,57 +46,6 @@
   </div>
 
   <script>
-    // ---------------------------------------------------------------
-    // Data: progressions. Each chord is a list of notes.
-    // ---------------------------------------------------------------
-    const PROGRESSIONS = {
-      jazz251: {
-        label: "ii7 - V7 - Imaj7 - VI7 (Jazz Standard)",
-        chords: [
-          ["D3", "F3", "A3", "C4", "E4"],  // Dm9
-          ["G3", "B3", "D4", "F4"],        // G7
-          ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
-          ["A3", "C#4", "E4", "G4"]        // A7
-        ]
-      },
-      rising: {
-        label: "Imaj9 - IImaj7 - iii7 - IVmaj7 (Rising Climb)",
-        chords: [
-          ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
-          ["D3", "F#3", "A3", "C#4", "E4"],// Dmaj9 (Lydian lift)
-          ["E3", "G3", "B3", "D4"],        // Em7
-          ["F3", "A3", "C4", "E4"]         // Fmaj7
-        ]
-      },
-      descending: {
-        label: "IVmaj9 - iii7 - ii9 - Imaj9 (Descending Exhale)",
-        chords: [
-          ["F3", "A3", "C4", "E4", "G4"],  // Fmaj9
-          ["E3", "G3", "B3", "D4"],        // Em7
-          ["D3", "F3", "A3", "C4", "E4"],  // Dm9
-          ["C3", "E3", "G3", "B3", "D4"]   // Cmaj9
-        ]
-      },
-      turnaround: {
-        label: "Imaj9 - vi9 - ii9 - V13 (Sunny Turnaround)",
-        chords: [
-          ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
-          ["A2", "C3", "E3", "G3", "B3"],  // Am9
-          ["D3", "F3", "A3", "C4", "E4"],  // Dm9
-          ["F3", "G3", "B3", "E4"]         // G13
-        ]
-      },
-      sway: {
-        label: "Imaj9 - IVmaj9 (Two-Chord Sway)",
-        chords: [
-          ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
-          ["E3", "G3", "B3", "D4", "G4"],  // Cmaj9 (open voicing)
-          ["F3", "A3", "C4", "E4", "G4"],  // Fmaj9
-          ["A3", "C4", "E4", "G4"]         // Fmaj9 (upper voicing)
-        ]
-      }
-    };
-
     const SHAPE_LABELS = {
       triangle: "Triangle (Warm/Soft)",
       softtri:  "Soft Triangle (Rounded/Mellow)",
@@ -122,6 +71,9 @@
 
         let lastMelodyNote = null;                  // private to this record
         let currentChord = null;                    // the chord of the current bar (pad plays it, melody picks from it)
+
+        // Lock-screen name of a progression: the text in parentheses in its label.
+        const progName = (k) => (rec.progs[k].label.match(/\(([^)]+)\)/) || [0, k])[1];
 
         function noiseHit(a, t, dest, level, decay) {
           const s = a.ctx.createBufferSource();
@@ -229,7 +181,54 @@
           label: "Chillwave",
           bpm: { min: 55, max: 95, def: 83 },
           swing: 0.16,                        // delay on off-16ths, fraction of a step
-          progs: ["jazz251", "rising", "descending", "turnaround", "sway"],
+          // Chord progressions. Each chord is a list of notes (hand-voiced). Key order is the dropdown order.
+          progs: {
+            jazz251: {
+              label: "ii7 - V7 - Imaj7 - VI7 (Jazz Standard)",
+              chords: [
+                ["D3", "F3", "A3", "C4", "E4"],  // Dm9
+                ["G3", "B3", "D4", "F4"],        // G7
+                ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
+                ["A3", "C#4", "E4", "G4"]        // A7
+              ]
+            },
+            rising: {
+              label: "Imaj9 - IImaj7 - iii7 - IVmaj7 (Rising Climb)",
+              chords: [
+                ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
+                ["D3", "F#3", "A3", "C#4", "E4"],// Dmaj9 (Lydian lift)
+                ["E3", "G3", "B3", "D4"],        // Em7
+                ["F3", "A3", "C4", "E4"]         // Fmaj7
+              ]
+            },
+            descending: {
+              label: "IVmaj9 - iii7 - ii9 - Imaj9 (Descending Exhale)",
+              chords: [
+                ["F3", "A3", "C4", "E4", "G4"],  // Fmaj9
+                ["E3", "G3", "B3", "D4"],        // Em7
+                ["D3", "F3", "A3", "C4", "E4"],  // Dm9
+                ["C3", "E3", "G3", "B3", "D4"]   // Cmaj9
+              ]
+            },
+            turnaround: {
+              label: "Imaj9 - vi9 - ii9 - V13 (Sunny Turnaround)",
+              chords: [
+                ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
+                ["A2", "C3", "E3", "G3", "B3"],  // Am9
+                ["D3", "F3", "A3", "C4", "E4"],  // Dm9
+                ["F3", "G3", "B3", "E4"]         // G13
+              ]
+            },
+            sway: {
+              label: "Imaj9 - IVmaj9 (Two-Chord Sway)",
+              chords: [
+                ["C3", "E3", "G3", "B3", "D4"],  // Cmaj9
+                ["E3", "G3", "B3", "D4", "G4"],  // Cmaj9 (open voicing)
+                ["F3", "A3", "C4", "E4", "G4"],  // Fmaj9
+                ["A3", "C4", "E4", "G4"]         // Fmaj9 (upper voicing)
+              ]
+            }
+          },
           lead: "melody", drums: "chill", jitter: 0.005,
           melodyDensity: 0.55,                // chance of a melody note on each eighth
           cutoffMul: 1, padCutoff: 1800, reverb: 0, echo: 0.3,
@@ -293,10 +292,16 @@
             a.nodes.delay.delayTime.setTargetAtTime(45 / a.S.bpm, a.ctx.currentTime, 0.05);
           },
 
+          // How many bars the current progression takes before it loops (the radio plans around this).
+          phraseBars(S) { return rec.progs[S.prog].chords.length; },
+
+          // Title for the lock screen / notification.
+          trackTitle(S) { return rec.label + " \u00b7 " + progName(S.prog); },
+
           // Called at every bar line (after the engine's own bar bookkeeping). `bar` counts bars
           // within the current track; the chord is picked from it.
           onBar(a, t, bar) {
-            const chords = PROGRESSIONS[a.S.prog].chords;     // temporary: the chords move into this record next
+            const chords = rec.progs[a.S.prog].chords;
             const chord = chords[bar % chords.length];
             currentChord = chord;
             if (!a.muted("pad")) pad(a, t, chord);
@@ -382,6 +387,8 @@
     const el = (tag, cls) => { const e = document.createElement(tag); if (cls) e.className = cls; return e; };
     const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
     const chanDefs = (st) => [MASTER, ...st.channels];
+    const progKeys = (st) => Object.keys(st.progs || {});                  // progression ids, in dropdown order
+    const phraseBars = () => { const st = STYLES[styleKey]; return st.phraseBars ? st.phraseBars(S) : 4; };
 
     // ---------------------------------------------------------------
     // Helpers
@@ -585,7 +592,7 @@
       // Count down an active scene; when it ends, sit out the next phrase-start decision.
       if (V.mute && --V.bars <= 0) { V.mute = null; V.skip = 1; }
 
-      const phraseLen = PROGRESSIONS[S.prog].chords.length;
+      const phraseLen = phraseBars();
       if (!V.mute && barIdx % phraseLen === 0) {
         if (V.skip > 0) V.skip--;
         else if (rng() < chance) {
@@ -595,8 +602,6 @@
       }
     }
 
-	const progName = (k) => (PROGRESSIONS[k].label.match(/\(([^)]+)\)/) || [0, k])[1];
-
 	function radioClone(base) {      // vol is shared; bpm/sel/prog are the radio's own copy
 	  R.base = base;
 	  return { bpm: base.bpm, vol: base.vol, sel: Object.assign({}, base.sel), prog: base.prog };
@@ -604,7 +609,7 @@
 
 	function radioPlan() {
 	  const ids = STYLES[styleKey].channels.map((c) => c.id);
-	  const P = PROGRESSIONS[S.prog].chords.length;
+	  const P = phraseBars();
 	  const shuf = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 	  const sched = (ord) => { let at = 0; const list = ord.map((ch) => { const e = { ch, at }; at += RADIO_STEP_CHOICES[Math.floor(rng() * RADIO_STEP_CHOICES.length)]; return e; }); return { list, end: at }; };
 
@@ -627,7 +632,7 @@
 	function radioNewTrack(first) {
 	  const st = STYLES[styleKey];
 	  if (!first) {
-	    const ps = st.progs.filter((p) => p !== S.prog);
+	    const ps = progKeys(st).filter((p) => p !== S.prog);
 	    if (ps.length) S.prog = ps[Math.floor(rng() * ps.length)];
 	    const up = rng() < clamp(0.5 + (st.bpm.def - S.bpm) / (st.bpm.max - st.bpm.min), 0.1, 0.9);
 	    S.bpm = clamp(S.bpm + (up ? 1 : -1) * Math.round(rand(2, 5)), st.bpm.min, st.bpm.max);
@@ -647,7 +652,7 @@
 	    try {
 	      const old = navigator.mediaSession.metadata;
 	      navigator.mediaSession.metadata = new MediaMetadata({
-	        title: STYLES[styleKey].label + " · " + progName(S.prog),
+	        title: st.trackTitle ? st.trackTitle(S) : st.label,
 	        artist: S.bpm + " BPM · Radio",
 	        artwork: old ? old.artwork : []
 	      });
@@ -680,7 +685,7 @@
 	    S = radioClone(S); R.n = 0;
 	    if (playing) {                               // join mid-beat: new track, skipping its intro
 	      radioNewTrack(true);
-	      R.bar = Math.ceil(R.introBars / PROGRESSIONS[S.prog].chords.length) * PROGRESSIONS[S.prog].chords.length;
+	      R.bar = Math.ceil(R.introBars / phraseBars()) * phraseBars();
 	    }
 	  } else {
 	    Object.assign(R.base, { bpm: S.bpm, prog: S.prog, sel: Object.assign({}, S.sel) });
@@ -740,7 +745,7 @@
       chanDefs(st).forEach((c) => { vol[c.id] = c.def; });
       const sel = {};
       st.selects.forEach((s) => { sel[s.id] = s.def; });
-      return { bpm: st.bpm.def, vol, sel, prog: st.progs[0] };
+      return { bpm: st.bpm.def, vol, sel, prog: progKeys(st)[0] };
     }
 
     // Copy any valid values from src into store[key]; ignore anything invalid.
@@ -757,7 +762,7 @@
         const v = src.sel && src.sel[s.id];
         if (s.options.some((o) => o[0] === v)) d.sel[s.id] = v;
       });
-      if (st.progs.includes(src.prog)) d.prog = src.prog;
+      if (progKeys(st).includes(src.prog)) d.prog = src.prog;
     }
 
     function loadSettings() {
@@ -890,11 +895,11 @@
     function fillProgressions() {
       const st = STYLES[styleKey], sel = $("progSelect");
       sel.textContent = "";
-      st.progs.forEach((key) => {
-        const o = el("option"); o.value = key; o.textContent = PROGRESSIONS[key].label; sel.appendChild(o);
+      progKeys(st).forEach((key) => {
+        const o = el("option"); o.value = key; o.textContent = st.progs[key].label; sel.appendChild(o);
       });
       sel.value = S.prog;
-      $("progGroup").hidden = st.progs.length < 2;
+      $("progGroup").hidden = progKeys(st).length < 2;
     }
 
     function switchStyle(key) {
