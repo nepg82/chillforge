@@ -18,7 +18,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261102-1845</h2>
+    <h2 id="ver">261103-0715</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -114,13 +114,14 @@
         // ===========================================================
         // RECORD: Chillwave
         // Everything that makes this style sound the way it does lives in this block. The engine
-        // reaches it only through the descriptor built below (buildGraph, onTempo, voices, patterns,
-        // reset, plus the data fields). Anything the record needs from the engine comes in through
+        // reaches it only through the descriptor built below (buildGraph, onTempo, onBar, onStep, reset,
+        // plus the data fields). Anything the record needs from the engine comes in through
         // `a` (the engine api): audio context, its own graph nodes, current settings, random
         // numbers, tempo, and note/shape helpers. The record never touches transport or timers.
         // ===========================================================
 
         let lastMelodyNote = null;                  // private to this record
+        let currentChord = null;                    // the chord of the current bar (pad plays it, melody picks from it)
 
         function noiseHit(a, t, dest, level, decay) {
           const s = a.ctx.createBufferSource();
@@ -230,6 +231,7 @@
           swing: 0.16,                        // delay on off-16ths, fraction of a step
           progs: ["jazz251", "rising", "descending", "turnaround", "sway"],
           lead: "melody", drums: "chill", jitter: 0.005,
+          melodyDensity: 0.55,                // chance of a melody note on each eighth
           cutoffMul: 1, padCutoff: 1800, reverb: 0, echo: 0.3,
           channels: [                         // mixer rows (Master is always added first)
             { id: "drums",  label: "Drums",  max: 6, def: 0 },
@@ -291,9 +293,23 @@
             a.nodes.delay.delayTime.setTargetAtTime(45 / a.S.bpm, a.ctx.currentTime, 0.05);
           },
 
-          voices: { pad, melody },
+          // Called at every bar line (after the engine's own bar bookkeeping). `bar` counts bars
+          // within the current track; the chord is picked from it.
+          onBar(a, t, bar) {
+            const chords = PROGRESSIONS[a.S.prog].chords;     // temporary: the chords move into this record next
+            const chord = chords[bar % chords.length];
+            currentChord = chord;
+            if (!a.muted("pad")) pad(a, t, chord);
+          },
+
+          // Called on every 16th step (s = 0..15). t already includes the engine's swing.
+          onStep(a, s, t) {
+            if (!a.muted("drums")) rec.patterns[rec.drums](a, s, t + a.rand(-rec.jitter, rec.jitter));
+            if (s % 2 === 0 && !a.muted("melody") && a.rng() < rec.melodyDensity) melody(a, t, currentChord);
+          },
+
           patterns: { chill: drumsChill },
-          reset() { lastMelodyNote = null; }        // engine calls this on start / style switch
+          reset() { lastMelodyNote = null; currentChord = null; }   // engine calls this on start / style switch
         };
 
         return rec;
@@ -303,7 +319,6 @@
 
     // Fixed tone settings (formerly the Intensity "Standard" preset).
     const CUTOFF = 2500;          // master lowpass cutoff (Hz), multiplied by the style's cutoffMul
-    const MELODY_DENSITY = 0.55;  // chance of a melody note on each eighth (Chillwave)
 
     // Waveform loudness compensation so shapes sit at similar levels.
     const SHAPE_LEVEL = { sine: 1.2, softtri: 1.1, triangle: 1, sawtooth: 0.4, square: 0.35, super: 0.2 };
@@ -345,8 +360,7 @@
 	} catch (e) {}
 	alive("boot");
     
-    let step = 0, nextTime = 0, chordIdx = 0;
-    let currentChord = null;
+    let step = 0, nextTime = 0, barIdx = 0;
     let irBuf = null;
 
     // Variation state: mute = array of muted channel ids (or null), bars = bars left in the scene,
@@ -420,6 +434,7 @@
       get nodes() { return g ? g.nodes : null; },
       get S() { return S; },
       get noise() { return noiseBuf; },
+      muted: (ch) => muted(ch),
       rng, rand, stepDur, noteFreq, applyShape,
       shapeLevel: SHAPE_LEVEL
     };
@@ -571,7 +586,7 @@
       if (V.mute && --V.bars <= 0) { V.mute = null; V.skip = 1; }
 
       const phraseLen = PROGRESSIONS[S.prog].chords.length;
-      if (!V.mute && chordIdx % phraseLen === 0) {
+      if (!V.mute && barIdx % phraseLen === 0) {
         if (V.skip > 0) V.skip--;
         else if (rng() < chance) {
           V.mute = pickScene(st.scenes);
@@ -623,7 +638,7 @@
 	    });
 	    tempoChanged();
 	  }
-	  R.n++; chordIdx = 0;
+	  R.n++; barIdx = 0;
 	  radioPlan();
 	  refreshers.forEach((f) => f());
 	  Object.keys(selEls).forEach((id) => { selEls[id].value = S.sel[id]; });
@@ -649,7 +664,7 @@
 	  if (R.skip) { R.skip = false; if (R.bar < R.gapBar) R.bar = R.gapBar; }
 	  if (R.bar > R.gapBar) radioNewTrack(false);
 	  const b = R.bar++;
-	  chordIdx = b;
+	  barIdx = b;
 	  if (b < R.introBars) { R.phase = "intro"; R.mute = R.intro.filter((e) => e.at > b).map((e) => e.ch); }
 	  else if (b >= R.ib) { R.phase = b < R.gapBar ? "outro" : "gap"; R.mute = R.out.filter((e) => e.at <= b - R.ib).map((e) => e.ch); }
 	  else { R.phase = "body"; R.mute = null; }
@@ -681,37 +696,19 @@
 	}
 
     // ---------------------------------------------------------------
-    // Chord stepping (the sounds themselves live in the style's record)
-    // ---------------------------------------------------------------
-    // Always advances the chord (the bass and arp depend on it); the pad sound is optional.
-    function playChord(t, withPad) {
-      const chords = PROGRESSIONS[S.prog].chords;
-      const pos = chordIdx % chords.length;
-      const chord = chords[pos];
-      chordIdx++;
-      currentChord = chord;
-
-      if (!withPad) return;
-      STYLES[styleKey].voices.pad(api, t, chord);
-    }
-
-
-    // ---------------------------------------------------------------
     // Scheduler (16 steps per bar, 4/4)
     // ---------------------------------------------------------------
     function scheduleStep(s, t) {
       const st = STYLES[styleKey];
-      if (s % 2 === 1) t += stepDur() * st.swing;          // swing the off-16ths
+      if (s % 2 === 1) t += stepDur() * (st.swing || 0);   // swing the off-16ths
 
-      if (s === 0) {
-	    if (R.on) radioBar(); else updateVariation();
-	    playChord(t, !muted("pad"));
-	  }
+      if (s === 0) {                                       // bar line
+        if (R.on) radioBar(); else updateVariation();
+        if (st.onBar) st.onBar(api, t, barIdx);
+        barIdx++;
+      }
 
-      if (!muted("drums")) st.patterns[st.drums](api, s, t + rand(-st.jitter, st.jitter));
-
-	  if (s % 2 === 0 && !muted("melody") && rng() < MELODY_DENSITY) st.voices.melody(api, t, currentChord);
-
+      if (st.onStep) st.onStep(api, s, t);
     }
 
     function tick() {
@@ -905,7 +902,7 @@
 	  S = store[key];
 	  if (R.on) S = radioClone(S);
 	  radioInfo();
-	  chordIdx = 0; currentChord = null; STYLES[styleKey].reset();
+	  barIdx = 0; STYLES[styleKey].reset();
       resetVariation();
       buildControls();
       fillProgressions();
@@ -926,7 +923,7 @@
       log("audio sr=" + ctx.sampleRate + " baseLat=" + (ctx.baseLatency || 0).toFixed(3) + " outLat=" + (ctx.outputLatency || 0).toFixed(3));
       silentEl.play().catch(() => {});
       buildGraph();
-      step = 0; chordIdx = 0; currentChord = null; STYLES[styleKey].reset();
+      step = 0; barIdx = 0; STYLES[styleKey].reset();
       resetVariation();
       if (R.on) { R.n = 0; R.skip = false; radioNewTrack(true); }
       nextTime = ctx.currentTime + 0.1;
@@ -979,7 +976,7 @@
     styleSelect.addEventListener("change", (e) => switchStyle(e.target.value));
 
     $("progSelect").addEventListener("change", (e) => {
-      S.prog = e.target.value; chordIdx = 0; resetVariation(); saveSettings();
+      S.prog = e.target.value; barIdx = 0; resetVariation(); saveSettings();
     });
 
     buildControls();
