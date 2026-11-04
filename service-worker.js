@@ -1,9 +1,10 @@
-const CACHE_NAME = "chillforge-cache-v2.2.7";
+const CACHE_NAME = "chillforge-cache-v2.2.8";
 
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
+  "./records/chillwave.js",
   "./manifest.json",
   "./app-icons/app-icon-192.png",
   "./app-icons/app-icon-512.png"
