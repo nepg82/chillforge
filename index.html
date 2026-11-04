@@ -18,7 +18,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261104-0652</h2>
+    <h2 id="ver">261103-1300</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -44,6 +44,10 @@
     <pre id="dbg" hidden></pre>
     
   </div>
+
+  <!-- Style records live in their own files and register themselves before the engine below runs.
+       To remove the Pulse test style, delete this one line. -->
+  <script src="records/pulse.js"></script>
 
   <script>
     const SHAPE_LABELS = {
@@ -399,6 +403,36 @@
 	const R = { on: false, base: null, n: 0, bar: 0, phase: "body", skip: false, mute: null,
 	            intro: [], out: [], introBars: 0, ib: 0, gapBar: 0 };
 	let refreshers = [], selEls = {};
+
+    // Records kept in their own files register themselves before this script runs:
+    //   (window.CHILLFORGE_RECORDS = window.CHILLFORGE_RECORDS || []).push(["key", record]);
+    // Adding a style is then a new file plus a <script> tag, never an edit to this engine.
+    // A record missing something essential is skipped (and logged) so it can't take the app down.
+    (window.CHILLFORGE_RECORDS || []).forEach(([key, rec]) => {
+      const bad = [];
+      if (!rec || typeof rec !== "object") bad.push("not an object");
+      else {
+        if (!rec.label) bad.push("label");
+        if (!rec.bpm || !(rec.bpm.min <= rec.bpm.def && rec.bpm.def <= rec.bpm.max)) bad.push("bpm {min, def, max}");
+        if (!Array.isArray(rec.channels)) bad.push("channels");
+        if (typeof rec.buildGraph !== "function") bad.push("buildGraph");
+      }
+      if (STYLES[key]) bad.push("key already in use");
+      if (bad.length) { log("record '" + key + "' skipped: " + bad.join(", ")); return; }
+      STYLES[key] = rec;
+    });
+
+    // THE RECORD CONTRACT
+    //   Required:  label, bpm {min, def, max}, channels [{id, label, max, def}], buildGraph(api, bus)
+    //              (buildGraph returns a gain node for every channel id)
+    //   Optional:  selects, progs, onBar, onStep, onTempo, phraseBars, trackTitle, radio, reset, swing, cutoffMul
+    // The defaults the engine assumes for the optional fields it can't do without:
+    Object.keys(STYLES).forEach((k) => {
+      const r = STYLES[k];
+      if (!r.selects) r.selects = [];                 // no pulldowns
+      if (!r.cutoffMul) r.cutoffMul = 1;              // master lowpass cutoff multiplier
+      if (!r.reset) r.reset = () => {};               // nothing to clear on start / style switch
+    });
 
     // Per-style settings (tempo, levels, pulldowns, progression), remembered separately.
     let styleKey = Object.keys(STYLES)[0];
