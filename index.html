@@ -18,7 +18,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261103-0758</h2>
+    <h2 id="ver">261104-0652</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -64,7 +64,7 @@
         // RECORD: Chillwave
         // Everything that makes this style sound the way it does lives in this block. The engine
         // reaches it only through the descriptor built below (buildGraph, onTempo, onBar, onStep, reset,
-        // plus the data fields). Anything the record needs from the engine comes in through
+        // phraseBars, trackTitle, radio rules, plus the data fields). Anything the record needs from the engine comes in through
         // `a` (the engine api): audio context, its own graph nodes, current settings, random
         // numbers, tempo, and note/shape helpers. The record never touches transport or timers.
         // ===========================================================
@@ -298,6 +298,28 @@
           // Title for the lock screen / notification.
           trackTitle(S) { return rec.label + " \u00b7 " + progName(S.prog); },
 
+          // Radio rules. The engine shuffles which channels enter (intro) and drop out (outro)
+          // and keeps to these constraints; nextTrack changes the settings for the next track.
+          radio: {
+            lastToEnter: ["pad", "drums"],    // one of these is always the last to enter
+            neverFirstIn: ["drums"],
+            neverLastOut: ["drums"],
+
+            // a.S is the radio's own copy of the settings, so nothing here is saved.
+            // (The engine re-syncs the tempo-linked echo afterwards.)
+            nextTrack(a) {
+              const S = a.S;
+              const ps = Object.keys(rec.progs).filter((p) => p !== S.prog);
+              if (ps.length) S.prog = ps[Math.floor(a.rng() * ps.length)];
+              const up = a.rng() < a.clamp(0.5 + (rec.bpm.def - S.bpm) / (rec.bpm.max - rec.bpm.min), 0.1, 0.9);
+              S.bpm = a.clamp(S.bpm + (up ? 1 : -1) * Math.round(a.rand(2, 5)), rec.bpm.min, rec.bpm.max);
+              rec.selects.forEach((s) => {
+                const pool = (s.radio || s.options.map((o) => o[0])).filter((v) => v !== S.sel[s.id]);
+                if (pool.length) S.sel[s.id] = pool[Math.floor(a.rng() * pool.length)];
+              });
+            }
+          },
+
           // Called at every bar line (after the engine's own bar bookkeeping). `bar` counts bars
           // within the current track; the chord is picked from it.
           onBar(a, t, bar) {
@@ -442,7 +464,7 @@
       get S() { return S; },
       get noise() { return noiseBuf; },
       muted: (ch) => muted(ch),
-      rng, rand, stepDur, noteFreq, applyShape,
+      rng, rand, clamp, stepDur, noteFreq, applyShape,
       shapeLevel: SHAPE_LEVEL
     };
 
@@ -608,18 +630,21 @@
 	}
 
 	function radioPlan() {
-	  const ids = STYLES[styleKey].channels.map((c) => c.id);
+	  const st = STYLES[styleKey], rr = st.radio || {};
+	  const ids = st.channels.map((c) => c.id);
 	  const P = phraseBars();
+	  const has = (list, c) => !!list && list.indexOf(c) !== -1;
 	  const shuf = (a) => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
 	  const sched = (ord) => { let at = 0; const list = ord.map((ch) => { const e = { ch, at }; at += RADIO_STEP_CHOICES[Math.floor(rng() * RADIO_STEP_CHOICES.length)]; return e; }); return { list, end: at }; };
 
-	  const lastIn = rng() < 0.5 ? "pad" : "drums";      // last to enter
+	  const cand = (rr.lastToEnter || []).filter((c) => ids.indexOf(c) !== -1);
+	  const lastIn = cand.length > 1 ? cand[Math.floor(rng() * cand.length)] : cand[0];   // last to enter
 	  const inOrd = shuf(ids.filter((c) => c !== lastIn));
-	  if (inOrd[0] === "drums") { const j = inOrd.length - 1; [inOrd[0], inOrd[j]] = [inOrd[j], inOrd[0]]; }
-	  inOrd.push(lastIn);
+	  if (has(rr.neverFirstIn, inOrd[0])) { const j = inOrd.length - 1; [inOrd[0], inOrd[j]] = [inOrd[j], inOrd[0]]; }
+	  if (lastIn) inOrd.push(lastIn);
 
-	  const outOrd = shuf(ids), L = outOrd.length - 1;          // drums never the last one left
-	  if (outOrd[L] === "drums") { const j = Math.floor(rng() * L); [outOrd[j], outOrd[L]] = [outOrd[L], outOrd[j]]; }
+	  const outOrd = shuf(ids), L = outOrd.length - 1;
+	  if (has(rr.neverLastOut, outOrd[L])) { const j = Math.floor(rng() * L); [outOrd[j], outOrd[L]] = [outOrd[L], outOrd[j]]; }
 
 	  const si = sched(inOrd), so = sched(outOrd), outBars = so.list[L].at;
 	  R.intro = si.list; R.introBars = si.end; R.out = so.list;
@@ -632,15 +657,7 @@
 	function radioNewTrack(first) {
 	  const st = STYLES[styleKey];
 	  if (!first) {
-	    const ps = progKeys(st).filter((p) => p !== S.prog);
-	    if (ps.length) S.prog = ps[Math.floor(rng() * ps.length)];
-	    const up = rng() < clamp(0.5 + (st.bpm.def - S.bpm) / (st.bpm.max - st.bpm.min), 0.1, 0.9);
-	    S.bpm = clamp(S.bpm + (up ? 1 : -1) * Math.round(rand(2, 5)), st.bpm.min, st.bpm.max);
-	    st.selects.forEach((s) => {
-	      if (s.id === "variation") return;
-	      const pool = (s.radio || s.options.map((o) => o[0])).filter((v) => v !== S.sel[s.id]);
-	      if (pool.length) S.sel[s.id] = pool[Math.floor(rng() * pool.length)];
-	    });
+	    if (st.radio && st.radio.nextTrack) st.radio.nextTrack(api);
 	    tempoChanged();
 	  }
 	  R.n++; barIdx = 0;
