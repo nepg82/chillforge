@@ -4,7 +4,7 @@
    This file is two things at once: the Chillwave style, and the reference
    for how to build any other style ("record") for Chillforge.
 
-   Contract last verified against engine build 261103-1400.
+   Contract last verified against engine build 261105-1000.
 
    IF YOU ARE CLAUDE AND YOU WERE GIVEN THIS FILE TO BUILD A NEW STYLE
    ----------------------------------------------------------------------------
@@ -89,7 +89,8 @@
                 labels; the shape of `chords` is yours. The chosen key is S.prog.
      phraseBars(S)  4. How many bars before the progression loops. Radio plans
                 its intro/outro lengths in multiples of this.
-     trackTitle(S)  the label. The lock-screen / notification title during Radio.
+     trackTitle(S, a)  the label. The lock-screen / notification title during Radio.
+                `a` is the api, so a keyed style can put the key name in the title.
      onBar(a, t, bar)   At every bar line. t = audio time of the downbeat. `bar`
                 counts bars since the track began (0 after Start, after the user
                 picks another progression, and after each Radio track change), so
@@ -105,6 +106,12 @@
      swing      0. Fraction of a 16th by which odd steps are delayed (0.16 here).
      cutoffMul  1. Multiplies the master lowpass cutoff (2500 Hz). Above 1 opens
                 the highs for brighter styles.
+     keyed      false. true = a KEYED style: the engine adds a Key pulldown (C to B),
+                saves the choice with the style's settings, gives you a.S.key (0-11,
+                0 = C), and picks a new random key for every Radio track (never the
+                same one twice running; radio.nextTrack may still override it).
+                Needs lib/theory.js: a keyed record is skipped if that did not load.
+     keyDef     0. The default key of a keyed style.
    Any other field is private to the record. Chillwave keeps jitter,
    melodyDensity, padCutoff, echo, lead, drums and reverb (unused) here.
 
@@ -128,6 +135,14 @@
                       changing waveform does not change volume.
      a.noise          shared 3-second mono white-noise AudioBuffer. Play it with
                       createBufferSource, starting at a random offset.
+     a.lib            the shared toolbox (files in lib/). a.lib.theory has scales, chord
+                      types, KEY_NAMES, mtof(midi), fold(pc, lo), chordMidi(key, {r, t},
+                      lo), chordPcs and scaleMidi; read the header of lib/theory.js.
+                      For a KEYED style, write chords as { r, t } (r = semitones above
+                      the key, t = chord type) so one progression works in every key,
+                      and give each instrument its own register through `lo`.
+                      records/pulse.js is the working example. Never reach for the
+                      toolbox any other way (a record is tested without the engine).
 
    5. TIMING
    ----------------------------------------------------------------------------
@@ -178,7 +193,8 @@
    8. SAVED SETTINGS
    ----------------------------------------------------------------------------
    Settings are saved per record key, using the channel ids, select ids, select
-   values and progression keys. NEVER rename any of them once shipped; the user's
+   values and progression keys (and the key, 0-11, of a keyed style). NEVER rename
+   any of them once shipped; the user's
    saved settings would silently reset. The engine validates saved values
    (clamps tempo and volume, rejects unknown progressions and select values).
 
@@ -193,7 +209,8 @@
    ----------------------------------------------------------------------------
    - Save it as records/<name>.js.
    - In index.html add <script src="records/<name>.js"></script> after
-     chillwave's tag and before the large inline script. Tag order is the Style
+     chillwave's tag and before the large inline script. Toolbox files (lib/) are
+     listed first; a new toolbox file also goes in APP_SHELL. Tag order is the Style
      dropdown order, and the FIRST record is the default style, so Chillwave
      stays first.
    - Add it to APP_SHELL in service-worker.js if it should work offline right
@@ -222,8 +239,9 @@
    ----------------------------------------------------------------------------
    - Mid-song "variation" (an earlier version muted channels for a few bars).
      Dormant code for it remains in the engine and is NOT part of this contract.
-   - Keys / transposition. Idea: a "Key" select applied when note names become
-     frequencies; keep it inside the record until two styles need it.
+   - Keys IN THIS FILE. Chillwave is not keyed yet: its progressions are hand-voiced
+     note names in C. (Keyed styles are supported; see `keyed` above. Chillwave
+     will be rebuilt as a keyed style in a later step.)
    - Anything other than 4/4 with 16 steps per bar.
 
    13. THIS FILE AS A WORKED EXAMPLE
@@ -232,8 +250,8 @@
    engine's), private state, the voices (noiseHit, kick, snare, hat, pad,
    melody), the drum pattern, then the `rec` object: data fields, progressions,
    buildGraph, onTempo, radio, phraseBars, trackTitle, onBar, onStep, reset.
-   records/pulse.js is a much smaller example (a kick and a bass note) and is
-   the better template for a simple style.
+   records/pulse.js is a much smaller example (a kick and a bass note, with keys)
+   and is the better template for a simple style.
    ============================================================================ */
 
 (window.CHILLFORGE_RECORDS = window.CHILLFORGE_RECORDS || []).push(["chillwave", (() => {

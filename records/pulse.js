@@ -1,10 +1,18 @@
 // ---------------------------------------------------------------------------
 // RECORD: Pulse (test)
 // A deliberately small second style: a four-on-the-floor kick and a bass note.
-// It exists to prove a style can be added as a separate file with no engine edits.
-// Note the channel ids (kick, bass): the engine must not care what they are called.
+// It exists to prove a style can be added as a separate file with no engine edits,
+// and (since build 261105-1000) to prove KEYS: it declares `keyed: true`, so the
+// engine adds a Key pulldown, saves it, picks a new random key for each Radio
+// track, and hands this record the current key as a.S.key.
 //
-// To remove it from the app: delete its <script> tag in index.html.
+// Chords are { r, t }: r = root in semitones above the key, t = a chord type from
+// a.lib.theory.CHORD_TYPES. So "Pump" below works in all 12 keys. The bass root is
+// folded into one fixed register (MIDI 40-51, about 82-164 Hz) in every key, so it
+// never drifts out of what a phone speaker can reproduce.
+//
+// Note the channel ids (kick, bass): the engine must not care what they are called.
+// To remove this style from the app: delete its <script> tag in index.html.
 // ---------------------------------------------------------------------------
 (window.CHILLFORGE_RECORDS = window.CHILLFORGE_RECORDS || []).push(["pulse", (() => {
 
@@ -14,8 +22,13 @@
     ["sawtooth", "Sawtooth (Bright/Buzzy)"],
     ["square",   "Square (Hollow/Retro)"]
   ];
+  const BASS_LO = 40;                                // bass root is folded into MIDI 40..51
 
-  let root = null;                                   // this bar's bass note
+  const c = (r, t) => ({ r, t });
+  let root = null;                                   // this bar's bass note (MIDI)
+
+  // Lock-screen name of a progression: the text in parentheses in its label.
+  const progName = (k) => (rec.progs[k].label.match(/\(([^)]+)\)/) || [0, k])[1];
 
   function kick(a, t, vel) {
     const o = a.ctx.createOscillator();
@@ -31,14 +44,14 @@
     o.stop(t + 0.4);
   }
 
-  function bass(a, t, note, steps) {
+  function bass(a, t, midi, steps) {
     const shape = a.S.sel.bassShape;
     const dur = steps * a.stepDur();
     const peak = 0.35 * a.shapeLevel[shape];
     const o = a.ctx.createOscillator();
     const gn = a.ctx.createGain();
     a.applyShape(o, shape);
-    o.frequency.value = a.noteFreq(note);
+    o.frequency.value = a.lib.theory.mtof(midi);
     gn.gain.setValueAtTime(0.0001, t);
     gn.gain.linearRampToValueAtTime(peak, t + 0.01);
     gn.gain.setTargetAtTime(0, t + dur - 0.05, 0.08);
@@ -49,7 +62,8 @@
 
   const rec = {
     label: "Pulse (test)",
-    bpm: { min: 90, max: 130, def: 110 },
+    keyed: true,
+    bpm: { min: 90, def: 110, max: 130 },
 
     channels: [
       { id: "kick", label: "Kick", max: 6, def: 0 },
@@ -59,8 +73,8 @@
       { id: "bassShape", label: "Bass", def: "sine", options: SHAPES, radio: ["sine", "triangle"] }
     ],
     progs: {
-      pump: { label: "Am - F - C - G (Pump)",  chords: [["A2"], ["F2"], ["C3"], ["G2"]] },
-      rise: { label: "Am - G - F - E (Rise)",  chords: [["A2"], ["G2"], ["F2"], ["E2"]] }
+      pump: { label: "i - \u266dVI - \u266dIII - \u266dVII (Pump)", chords: [c(0, "min"), c(8, "maj"), c(3, "maj"), c(10, "maj")] },
+      rise: { label: "i - \u266dVII - \u266dVI - V (Rise)",        chords: [c(0, "min"), c(10, "maj"), c(8, "maj"), c(7, "maj")] }
     },
 
     buildGraph(a, bus) {
@@ -70,17 +84,22 @@
       return n;
     },
 
+    trackTitle(S, a) {
+      return rec.label + " \u00b7 " + a.lib.theory.KEY_NAMES[S.key] + " \u00b7 " + progName(S.prog);
+    },
+
     onBar(a, t, bar) {
       const chords = rec.progs[a.S.prog].chords;
-      root = chords[bar % chords.length][0];
+      root = a.lib.theory.chordMidi(a.S.key, chords[bar % chords.length], BASS_LO)[0];
     },
 
     onStep(a, s, t) {
       if (s % 4 === 0 && !a.muted("kick")) kick(a, t, s === 0 ? 1 : 0.85);
-      if (root && (s === 0 || s === 8) && !a.muted("bass")) bass(a, t, root, 8);
+      if (root !== null && (s === 0 || s === 8) && !a.muted("bass")) bass(a, t, root, 8);
     },
 
     // Radio: step to the other progression and drift the tempo a little each track.
+    // (The engine has already picked a new random key for the track.)
     radio: {
       nextTrack(a) {
         const keys = Object.keys(rec.progs);

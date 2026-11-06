@@ -18,7 +18,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <h2 id="ver">261104-1803</h2>
+    <h2 id="ver">261105-1000</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -33,6 +33,11 @@
       <select id="styleSelect"></select>
     </div>
 
+    <div class="control-group" id="keyGroup" hidden>
+      <label for="keySelect">Key</label>
+      <select id="keySelect"></select>
+    </div>
+
     <div class="control-group" id="progGroup">
       <label for="progSelect">Chord Progression</label>
       <select id="progSelect"></select>
@@ -45,9 +50,10 @@
     
   </div>
 
-  <!-- Style records live in their own files and register themselves before the engine below runs.
-       Tag order is the Style dropdown order, and the FIRST record is the default style.
+  <!-- Shared toolbox files (lib/) come first, then style records. Both register themselves before the engine below runs.
+       Record tag order is the Style dropdown order, and the FIRST record is the default style.
        To remove the Pulse test style, delete its line. -->
+  <script src="lib/theory.js"></script>
   <script src="records/chillwave.js"></script>
   <script src="records/pulse.js"></script>
 
@@ -128,6 +134,7 @@
         if (!Array.isArray(rec.channels)) bad.push("channels");
         if (typeof rec.buildGraph !== "function") bad.push("buildGraph");
       }
+      if (rec && rec.keyed && !(window.CHILLFORGE_LIB && window.CHILLFORGE_LIB.theory)) bad.push("keyed, but lib/theory.js did not load");
       if (STYLES[key]) bad.push("key already in use");
       if (bad.length) { log("record '" + key + "' skipped: " + bad.join(", ")); return; }
       STYLES[key] = rec;
@@ -136,7 +143,9 @@
     // THE RECORD CONTRACT
     //   Required:  label, bpm {min, def, max}, channels [{id, label, max, def}], buildGraph(api, bus)
     //              (buildGraph returns a gain node for every channel id)
-    //   Optional:  selects, progs, onBar, onStep, onTempo, phraseBars, trackTitle, radio, reset, swing, cutoffMul
+    //   Optional:  selects, progs, onBar, onStep, onTempo, phraseBars, trackTitle, radio, reset, swing, cutoffMul,
+    //              keyed (true: the engine adds a Key pulldown, saves it, and gives the record a.S.key 0-11, 0 = C;
+    //              Radio picks a new random key per track. Needs lib/theory.js), keyDef (default key, 0)
     // The defaults the engine assumes for the optional fields it can't do without:
     Object.keys(STYLES).forEach((k) => {
       const r = STYLES[k];
@@ -208,6 +217,7 @@
       get nodes() { return g ? g.nodes : null; },
       get S() { return S; },
       get noise() { return noiseBuf; },
+      get lib() { return window.CHILLFORGE_LIB || null; },     // shared toolbox, e.g. a.lib.theory
       muted: (ch) => muted(ch),
       rng, rand, clamp, stepDur, noteFreq, applyShape,
       shapeLevel: SHAPE_LEVEL
@@ -371,7 +381,8 @@
 
 	function radioClone(base) {      // vol is shared; bpm/sel/prog are the radio's own copy
 	  R.base = base;
-	  return { bpm: base.bpm, vol: base.vol, sel: Object.assign({}, base.sel), prog: base.prog };
+	  return Object.assign({ bpm: base.bpm, vol: base.vol, sel: Object.assign({}, base.sel), prog: base.prog },
+	    base.key === undefined ? {} : { key: base.key });
 	}
 
 	function radioPlan() {
@@ -399,9 +410,16 @@
 	  R.bar = 0;
 	}
 
+	// Radio: every new track gets a different random key (never the same one twice in a row).
+	function radioNewKey() {
+	  const k = Math.floor(rng() * 11);
+	  S.key = k >= S.key ? k + 1 : k;
+	}
+
 	function radioNewTrack(first) {
 	  const st = STYLES[styleKey];
 	  if (!first) {
+	    if (st.keyed) radioNewKey();
 	    if (st.radio && st.radio.nextTrack) st.radio.nextTrack(api);
 	    tempoChanged();
 	  }
@@ -410,11 +428,12 @@
 	  refreshers.forEach((f) => f());
 	  Object.keys(selEls).forEach((id) => { selEls[id].value = S.sel[id]; });
 	  $("progSelect").value = S.prog;
+	  if (st.keyed) $("keySelect").value = String(S.key);
 	  if ("mediaSession" in navigator) {
 	    try {
 	      const old = navigator.mediaSession.metadata;
 	      navigator.mediaSession.metadata = new MediaMetadata({
-	        title: st.trackTitle ? st.trackTitle(S) : st.label,
+	        title: st.trackTitle ? st.trackTitle(S, api) : st.label,
 	        artist: S.bpm + " BPM · Radio",
 	        artwork: old ? old.artwork : []
 	      });
@@ -450,7 +469,7 @@
 	      R.bar = Math.ceil(R.introBars / phraseBars()) * phraseBars();
 	    }
 	  } else {
-	    Object.assign(R.base, { bpm: S.bpm, prog: S.prog, sel: Object.assign({}, S.sel) });
+	    Object.assign(R.base, { bpm: S.bpm, prog: S.prog, sel: Object.assign({}, S.sel) }, S.key === undefined ? {} : { key: S.key });
 	    S = R.base; R.mute = null; resetVariation(); saveSettings();
 	  }
 	  $("radioBtn").textContent = "Radio: " + (on ? "On" : "Off");
@@ -507,7 +526,9 @@
       chanDefs(st).forEach((c) => { vol[c.id] = c.def; });
       const sel = {};
       st.selects.forEach((s) => { sel[s.id] = s.def; });
-      return { bpm: st.bpm.def, vol, sel, prog: progKeys(st)[0] };
+      const state = { bpm: st.bpm.def, vol, sel, prog: progKeys(st)[0] };
+      if (st.keyed) state.key = st.keyDef || 0;      // 0-11, 0 = C
+      return state;
     }
 
     // Copy any valid values from src into store[key]; ignore anything invalid.
@@ -525,6 +546,7 @@
         if (s.options.some((o) => o[0] === v)) d.sel[s.id] = v;
       });
       if (progKeys(st).includes(src.prog)) d.prog = src.prog;
+      if (st.keyed && Number.isInteger(src.key) && src.key >= 0 && src.key <= 11) d.key = src.key;
     }
 
     function loadSettings() {
@@ -654,6 +676,15 @@
       });
     }
 
+    const keyNames = () => (window.CHILLFORGE_LIB && window.CHILLFORGE_LIB.theory ? window.CHILLFORGE_LIB.theory.KEY_NAMES : []);
+    function fillKey() {
+      const st = STYLES[styleKey], sel = $("keySelect");
+      sel.textContent = "";
+      keyNames().forEach((name, i) => { const o = el("option"); o.value = String(i); o.textContent = name; sel.appendChild(o); });
+      if (st.keyed) sel.value = String(S.key);
+      $("keyGroup").hidden = !st.keyed;
+    }
+
     function fillProgressions() {
       const st = STYLES[styleKey], sel = $("progSelect");
       sel.textContent = "";
@@ -672,6 +703,7 @@
 	  barIdx = 0; STYLES[styleKey].reset();
       resetVariation();
       buildControls();
+      fillKey();
       fillProgressions();
       saveSettings();
       if (playing) restartBeat();      // each style has its own audio graph
@@ -746,11 +778,14 @@
     styleSelect.value = styleKey;
     styleSelect.addEventListener("change", (e) => switchStyle(e.target.value));
 
+    $("keySelect").addEventListener("change", (e) => { S.key = Number(e.target.value); saveSettings(); });
+
     $("progSelect").addEventListener("change", (e) => {
       S.prog = e.target.value; barIdx = 0; resetVariation(); saveSettings();
     });
 
     buildControls();
+    fillKey();
     fillProgressions();
 
     // Bluetooth / lock-screen controls
