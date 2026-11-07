@@ -18,8 +18,7 @@
 <body>
   <div class="container">
     <h1>Chillforge</h1>
-    <!-- BUILD NUMBER -->
-    <h2 id="ver">261105-0519</h2>
+    <h2 id="ver">261107-1321</h2>
 
     <button id="playBtn">Start Beat</button>
     
@@ -55,6 +54,8 @@
        Record tag order is the Style dropdown order, and the FIRST record is the default style.
        To remove the Pulse test style, delete its line. -->
   <script src="lib/theory.js"></script>
+  <script src="lib/instruments.js"></script>
+  <script src="lib/parts.js"></script>
   <script src="records/chillwave.js"></script>
   <script src="records/pulse.js"></script>
 
@@ -136,6 +137,7 @@
         if (typeof rec.buildGraph !== "function") bad.push("buildGraph");
       }
       if (rec && rec.keyed && !(window.CHILLFORGE_LIB && window.CHILLFORGE_LIB.theory)) bad.push("keyed, but lib/theory.js did not load");
+      if (rec && Array.isArray(rec.needs)) rec.needs.forEach((lib) => { if (!(window.CHILLFORGE_LIB && window.CHILLFORGE_LIB[lib])) bad.push("needs the '" + lib + "' toolbox file, which did not load"); });
       if (STYLES[key]) bad.push("key already in use");
       if (bad.length) { log("record '" + key + "' skipped: " + bad.join(", ")); return; }
       STYLES[key] = rec;
@@ -143,8 +145,10 @@
 
     // THE RECORD CONTRACT
     //   Required:  label, bpm {min, def, max}, channels [{id, label, max, def}], buildGraph(api, bus)
-    //              (buildGraph returns a gain node for every channel id)
+    //              (buildGraph returns a gain node for every channel id; if the returned object has a
+    //              dispose() method, the engine calls it when the graph is torn down)
     //   Optional:  selects, progs, onBar, onStep, onTempo, phraseBars, trackTitle, radio, reset, swing, cutoffMul,
+    //              needs (list of toolbox names, e.g. ["theory", "instruments"]; the record is skipped if one did not load),
     //              keyed (true: the engine adds a Key pulldown, saves it, and gives the record a.S.key 0-11, 0 = C;
     //              Radio picks a new random key per track. Needs lib/theory.js), keyDef (default key, 0)
     // The defaults the engine assumes for the optional fields it can't do without:
@@ -317,6 +321,10 @@
       const old = g;
       g = null;
       old.out.gain.setTargetAtTime(0, ctx.currentTime, 0.04);
+      // A style whose buildGraph returned a dispose() gets to stop anything it left running (e.g. a shared vibrato oscillator).
+      if (old.nodes && typeof old.nodes.dispose === "function") {
+        try { old.nodes.dispose(); } catch (e) { log("ERR dispose: " + (e && e.message)); }
+      }
       setTimeout(() => old.out.disconnect(), 400);
     }
 

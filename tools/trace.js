@@ -21,7 +21,7 @@
 const fs = require("fs"), path = require("path"), vm = require("vm"), crypto = require("crypto");
 
 const GOLDEN = path.join(__dirname, "trace-golden.json");
-const LIBS = ["lib/theory.js"];            // shared toolbox files the real page loads before any record
+const LIBS = ["lib/theory.js", "lib/instruments.js", "lib/parts.js"];   // shared toolbox files the real page loads before any record
 const CORE = ["records/chillwave.js"];      // the production default style (the page's first record)
 const CLASSIC = "chillwave-classic.js";     // frozen copy of Chillwave in test-records/: what the original-derived scenarios run against
 const TICK = 0.05;                     // same as TICK_MS in the app
@@ -42,17 +42,31 @@ function mulberry32(a) {
 
 const KEYS = ["C", "C\u266f", "D", "E\u266d", "E", "F", "F\u266f", "G", "A\u266d", "A", "B\u266d", "B"];
 // MIDI note numbers (as floats) of single-frequency oscillators feeding the given channel gain (Pulse's bass)
-function bassMidis(text, gainId) {
-  const out = [];
-  for (const l of text.split("\n")) {
-    const m = /^osc \S+ f\[v=([0-9.eE+-]+)\] .*-> (gain#\d+)$/.exec(l);
-    if (m && m[2] === gainId) out.push(69 + 12 * Math.log2(parseFloat(m[1]) / 440));
-  }
-  return out;
+function feeders(text, gainId) {            // every persistent node that ends up feeding gainId, following the "edge A -> B" lines
+  const edges = [];
+  text.split("\n").forEach((l) => { const m = /^edge (\S+) -> (\S+)$/.exec(l); if (m) edges.push([m[1], m[2]]); });
+  const set = new Set([gainId]);
+  for (let grew = true; grew;) { grew = false; edges.forEach(([x, y]) => { if (set.has(y) && !set.has(x)) { set.add(x); grew = true; } }); }
+  return set;
 }
+// The fundamental (lowest oscillator, per note) of every note played into a channel, as MIDI numbers.
+function bassMidis(text, gainId) {
+  const feed = feeders(text, gainId), byStart = new Map();
+  text.split("\n").forEach((l) => {
+    const m = /^osc \S+ f\[v=([0-9.eE+-]+)\] /.exec(l), st = /@([0-9.eE+-]+)\.\./.exec(l);
+    if (!m || !st || !feed.has(l.split(" -> ").pop())) return;
+    const f = parseFloat(m[1]);
+    if (!byStart.has(st[1]) || f < byStart.get(st[1])) byStart.set(st[1], f);
+  });
+  return Array.from(byStart.values()).map((f) => 69 + 12 * Math.log2(f / 440));
+}
+const noLeaks = (text) => {            // every oscillator must have been stopped (an unstopped one is a leak)
+  const bad = text.split("\n").filter((l) => /^osc .*@\S+\.\.\? /.test(l));
+  return bad.length ? [bad.length + " oscillator(s) were never stopped (a vibrato oscillator the style forgot to dispose?)"] : [];
+};
 // In one fixed key, Pulse's "Pump" bass must only play that key's four chord roots, whole semitones, in MIDI 40-51.
 const pulseKeyCheck = (key) => (text) => {
-  const P = [], ms = bassMidis(text, "gain#3");
+  const P = [], ms = bassMidis(text, "gain#4");
   if (!ms.length) return ["no bass notes found in the trace"];
   const want = new Set([0, 8, 3, 10].map((r) => (key + r) % 12)), seen = new Set();
   ms.forEach((m) => {
@@ -131,7 +145,7 @@ const SCENARIOS = [
       { at: 8,  name: "tempo up x3",      run: (h) => h.press("Tempo up", 3) },
       { at: 16, name: "kick down x4",     run: (h) => h.press("Kick down", 4) },
       { at: 24, name: "bass up x2",       run: (h) => h.press("Bass up", 2) },
-      { at: 32, name: "bass sawtooth",    run: (h) => h.select("Bass sound", "sawtooth") },
+      { at: 32, name: "bass warm saw",     run: (h) => h.select("Bass sound", "warmSaw") },
       { at: 42, name: "other progression", run: (h) => h.select("progSelect", "rise") }
     ] },
   { name: "pulse-switch-live", seed: 213, duration: 60, records: ["records/pulse.js"], actions: [
@@ -142,7 +156,7 @@ const SCENARIOS = [
     setup: (h) => { h.select("styleSelect", "pulse"); h.click("radioBtn"); } },
   { name: "pulse-saved", seed: 215, duration: 20, records: ["records/pulse.js"], storage: {
       "chillforge-v3": JSON.stringify({ style: "pulse", store: {
-        pulse: { bpm: 100, key: 7, vol: { master: -12, kick: -3, bass: 2 }, sel: { bassShape: "square" }, prog: "rise" },
+        pulse: { bpm: 100, key: 7, vol: { master: -12, kick: -3, bass: 2 }, sel: { bassSound: "warmSaw", arpLine: "wide", leadSound: "tapeSine" }, prog: "rise" },
         chillwave: { bpm: 60 } } }) } },
   // ---- keys, proven on Pulse ----
   ...Array.from({ length: 12 }, (_, k) => ({ name: "pulse-key-" + k, seed: 300 + k, duration: 20, records: ["records/pulse.js"],
@@ -170,6 +184,31 @@ const SCENARIOS = [
     setup: (h) => { h.select("styleSelect", "pulse"); h.click("radioBtn"); },
     actions: Array.from({ length: 40 }, (_, i) => ({ at: 9 + i * 9, name: "next track " + (i + 1), run: (h) => h.click("nextBtn") })) },
   { name: "pulse-without-toolbox", seed: 2, duration: 40, records: ["records/pulse.js"], noLib: true, sameEventsAs: "default-seed2" },
+  // ---- the toolbox, proven on Pulse ----
+  { name: "bench-defaults", seed: 400, duration: 60, records: ["records/pulse.js"], budget: { oscPerSec: 12, peakOsc: 30, noteFiltersPerSec: 6 }, setup: (h) => h.select("styleSelect", "pulse") },
+  { name: "bench-options", seed: 401, duration: 90, records: ["records/pulse.js"], setup: (h) => h.select("styleSelect", "pulse"),
+    // plays every option of every pulldown in turn (read from the live record, so a new option is covered automatically)
+    actions: Array.from({ length: 32 }, (_, i) => ({ at: 4 + i * 2.6, name: "option " + (i + 1), run: (h) => {
+      const pairs = JSON.parse(h.eval("JSON.stringify((function () { var o = []; STYLES.pulse.selects.forEach(function (s) { s.options.forEach(function (op) { o.push([s.label + ' sound', op[0]]); }); }); return o; })())"));
+      if (pairs[i]) h.select(pairs[i][0], pairs[i][1]);
+    } })) },
+  { name: "bench-busiest", seed: 402, duration: 40, records: ["records/pulse.js"], reportLoad: true, storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { kickSound: "punchy", snareSound: "clap", hatSound: "dusty",
+        bassSound: "warmSaw", arpSound: "glassy", arpLine: "run", leadSound: "dreamySquare" } } } }) } },
+  { name: "bench-stop-leak", seed: 403, duration: 18, records: ["records/pulse.js"], verify: noLeaks, storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { leadSound: "dreamySquare" } } } }) },
+    actions: [ { at: 12, name: "stop", run: (h) => h.click("playBtn") } ] },
+  { name: "bench-leak-on-switch", seed: 404, duration: 20, records: ["records/pulse.js"], verify: noLeaks, storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { leadSound: "dreamySquare" } } } }) },
+    actions: [ { at: 10, name: "switch to Chillwave", run: (h) => h.select("styleSelect", "chillwave") } ] },
+  { name: "bench-sound-swap-leak", seed: 405, duration: 24, records: ["records/pulse.js"], verify: noLeaks, setup: (h) => h.select("styleSelect", "pulse"), actions: [
+    { at: 6,  name: "lead to Dreamy Square (vibrato)", run: (h) => h.select("Lead sound", "dreamySquare") },
+    { at: 12, name: "lead to Bell Pluck (no vibrato)", run: (h) => h.select("Lead sound", "bellPluck") },
+    { at: 20, name: "stop", run: (h) => h.click("playBtn") } ] },
+  { name: "toolbox-all-presets", seed: 410, duration: 26, fixtures: ["presets.js"], reportLoad: true, verify: noLeaks,
+    setup: (h) => h.select("styleSelect", "presets"), actions: [ { at: 20, name: "stop", run: (h) => h.click("playBtn") } ] },
+  { name: "load-chillwave-reference", seed: 1, duration: 96, budget: { oscPerSec: 5, peakOsc: 16 } },
+  { name: "pulse-needs-instruments", seed: 2, duration: 40, records: ["records/pulse.js"], libs: ["lib/theory.js"], sameEventsAs: "default-seed2" },
   { name: "chillwave-with-pulse-loaded", seed: 1, duration: 96, records: ["records/pulse.js"], sameEventsAs: "default-seed1" },
   { name: "bad-records-skipped", seed: 2, duration: 40, fixtures: ["broken.js"], sameEventsAs: "default-seed2" },
   { name: "no-styles-loaded", seed: 1, noCore: true, expectLoadError: "no styles loaded" },
@@ -232,13 +271,13 @@ function runScenario(sc, html, appDir) {
   if (!m) throw new Error("no inline <script> found in the html file");
   const scriptText = m[1];
 
-  const H = { timerQ: [], timerId: 0, inTick: false, events: [], nodes: [], edges: [], counts: {}, ctx: null, created: [], ids: {}, leaks: 0 };
+  const H = { tickCount: {}, timerQ: [], timerId: 0, inTick: false, events: [], nodes: [], edges: [], counts: {}, ctx: null, created: [], ids: {}, leaks: 0 };
   const emit = (s) => H.events.push(s);
   const problems = [];
 
   // ---- param + node mocks ---------------------------------------------------
   class Param {
-    constructor(owner, name, v) { this.owner = owner; this.name = name; this._v = v; this.log = []; }
+    constructor(owner, name, v) { this.owner = owner; this.name = name; this._v = v; this.log = []; this._mods = []; }
     get value() { return this._v; }
     set value(v) { this._chk(v); this._v = v; this._rec("v=" + num(v)); }
     _chk(v) { if (typeof v !== "number" || !isFinite(v)) throw new TypeError("non-finite value for " + this.owner.kind + "." + this.name + ": " + v); }
@@ -257,11 +296,12 @@ function runScenario(sc, html, appDir) {
   class MNode {
     constructor(kind, forceId) {
       this.kind = kind; this._out = [];
+      if (H.inTick) H.tickCount[kind] = (H.tickCount[kind] || 0) + 1;
       if (forceId) this._id = forceId;
       else if (!H.inTick) { H.counts[kind] = (H.counts[kind] || 0) + 1; this._id = kind + "#" + H.counts[kind]; }
       if (this._id) H.nodes.push(this);
     }
-    connect(d) { this._out.push(d); if (this._id && d && d._id) H.edges.push(this._id + " -> " + d._id); return d; }
+    connect(d) { if (d && d.constructor === Param) d._mods.push(this._id || this.kind); this._out.push(d); if (this._id && d && d._id) H.edges.push(this._id + " -> " + d._id); return d; }
     disconnect() {}
     _params() { return []; }
     _info() { return ""; }
@@ -314,7 +354,7 @@ function runScenario(sc, html, appDir) {
     stop(t) { this._stop = t; }
     _fmt() {
       return "osc " + (this._wave ? "wave:" + waveHash(this._wave) : this.type) +
-        " f[" + pl(this.frequency) + "] d[" + pl(this.detune) + "] @" + num(this._start) + ".." +
+        " f[" + pl(this.frequency) + "] d[" + pl(this.detune) + "]" + (this.detune._mods.length ? "<-" + this.detune._mods.join(",") : "") + " @" + num(this._start) + ".." +
         (this._stop === undefined ? "?" : num(this._stop)) + chain(this);
     }
   }
@@ -422,7 +462,7 @@ function runScenario(sc, html, appDir) {
   sandbox.__seeded = mulberry32(sc.seed);
   vm.runInContext("Math.random = __seeded;", context);
   const tags = Array.from(html.matchAll(/<script src="([^"]+)"><\/script>/g)).map((m) => m[1]);
-  if (!sc.noLib) tags.filter((f) => LIBS.indexOf(f) !== -1).forEach((f) => vm.runInContext(fs.readFileSync(path.join(appDir, f), "utf8"), recContext, { filename: f }));
+  if (!sc.noLib) tags.filter((f) => (sc.libs || LIBS).indexOf(f) !== -1).forEach((f) => vm.runInContext(fs.readFileSync(path.join(appDir, f), "utf8"), recContext, { filename: f }));
   if (!sc.noCore) {
     if (sc.production) tags.filter((f) => CORE.indexOf(f) !== -1).forEach((f) => vm.runInContext(fs.readFileSync(path.join(appDir, f), "utf8"), recContext, { filename: f }));
     else vm.runInContext(fs.readFileSync(path.join(__dirname, "test-records", CLASSIC), "utf8"), recContext, { filename: CLASSIC });
@@ -536,6 +576,19 @@ function runScenario(sc, html, appDir) {
     if (k >= MAX_TICKS) { problems.push("tick cap reached"); break; }
   }
 
+  // ---- load: how much work the audio engine is asked to do (what a phone has to keep up with) ----
+  const secs = (k + 1) * TICK, r1 = (x) => Math.round(x * 10) / 10;
+  const voices = H.events.filter((ev) => typeof ev !== "string");
+  const sweep = (list) => {
+    const pts = []; list.forEach((v) => { pts.push([v._start, 1]); pts.push([v._stop === undefined ? secs : v._stop, -1]); });
+    pts.sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+    let cur = 0, pk = 0; pts.forEach((q) => { cur += q[1]; if (cur > pk) pk = cur; }); return pk;
+  };
+  const oscV = voices.filter((v) => v.kind === "osc"), srcV = voices.filter((v) => v.kind === "src");
+  const load = { seconds: r1(secs), oscPerSec: r1(oscV.length / secs), peakOsc: sweep(oscV), srcPerSec: r1(srcV.length / secs), peakSrc: sweep(srcV),
+    noteFiltersPerSec: r1((H.tickCount.biquad || 0) / secs), noteGainsPerSec: r1((H.tickCount.gain || 0) / secs) };
+  if (sc.budget) Object.keys(sc.budget).forEach((kk) => { if (load[kk] > sc.budget[kk]) problems.push("load budget exceeded: " + kk + " " + load[kk] + " > " + sc.budget[kk]); });
+
   const state = h.eval("JSON.stringify({ step: step, chordIdx: (typeof barIdx !== 'undefined' ? barIdx : chordIdx), bpm: S.bpm, prog: S.prog, sel: S.sel, vol: S.vol, " +
     "radio: R.on ? { n: R.n, bar: R.bar, phase: R.phase } : null, nextTime: Math.round(nextTime * 1e6) / 1e6, " +
     "playing: playing, yielded: yielded, key: S.key })");
@@ -548,10 +601,11 @@ function runScenario(sc, html, appDir) {
     .concat(uiLoad, ["DATA"], dataAtLoad, ["EVENTS"],
       H.events.map((ev) => (typeof ev === "string" ? ev : ev._fmt())), ["UI-END"], uiSnapshot(), ["STATE " + state],
       Array.from(h.eval("LOG.filter(function (l) { return l.indexOf(\"skipped\") >= 0; })")).map((l) => "LOG " + l.slice(15)),
-      sc.checkSaved ? (() => { const raw = store["chillforge-v3"]; return ["SAVED " + (raw ? JSON.stringify(JSON.parse(raw)) : "nothing")]; })() : []);
+      sc.checkSaved ? (() => { const raw = store["chillforge-v3"]; return ["SAVED " + (raw ? JSON.stringify(JSON.parse(raw)) : "nothing")]; })() : [],
+      sc.budget || sc.reportLoad ? ["LOAD " + JSON.stringify(load)] : []);
   const finalText = out.join("\n") + "\n";
   if (sc.verify) sc.verify(finalText).forEach((p) => problems.push(p));
-  return { text: finalText, problems };
+  return { text: finalText, problems, load };
 }
 
 // ---------------------------------------------------------------------------
@@ -565,7 +619,8 @@ function unitTests(appDir) {
   const f = path.join(appDir, "lib", "theory.js");
   if (!fs.existsSync(f)) return [];
   const ctx = vm.createContext({ window: {} });
-  vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: "lib/theory.js" });
+  LIBS.forEach((lf) => { const fp = path.join(appDir, lf); if (fs.existsSync(fp)) vm.runInContext(fs.readFileSync(fp, "utf8"), ctx, { filename: lf }); });
+  vm.runInContext("Math.random = function () { throw new Error('Math.random was called (use the rng you are given)'); };", ctx);
   const T = ctx.window.CHILLFORGE_LIB && ctx.window.CHILLFORGE_LIB.theory;
   const out = [];
   const test = (name, fn) => {
@@ -642,10 +697,151 @@ function unitTests(appDir) {
     eq(Object.isFrozen(T) && Object.isFrozen(T.SCALES) && Object.isFrozen(T.CHORD_TYPES) && Object.isFrozen(T.KEY_NAMES), "top-level objects not frozen");
     eq(Object.keys(T.CHORD_TYPES).every((k) => Object.isFrozen(T.CHORD_TYPES[k])) && Object.keys(T.SCALES).every((k) => Object.isFrozen(T.SCALES[k])), "interval arrays not frozen");
   });
+
+  // ================= parts =================
+  const PA = ctx.window.CHILLFORGE_LIB.parts, IN = ctx.window.CHILLFORGE_LIB.instruments;
+  const slice16 = (pat, bar) => { const o = (bar % (pat.length / 16)) * 16; return pat.slice(o, o + 16); };
+  if (PA) {
+    test("parts: patterns and rhythms are well-formed", (eq) => {
+      Object.keys(PA.PATTERNS).forEach((kind) => Object.keys(PA.PATTERNS[kind]).forEach((id) => {
+        const e = PA.PATTERNS[kind][id], bad = PA.validatePattern(kind, e.pat);
+        eq(!!e.label, kind + "." + id + " has no label"); eq(bad.length === 0, kind + "." + id + ": " + bad.join(", "));
+      }));
+      Object.keys(PA.RHYTHMS).forEach((id) => {
+        const r = PA.RHYTHMS[id]; eq(r.bars.length === 2 && !!r.label, id + " needs a label and 2 bars");
+        r.bars.forEach((cells, b) => { let end = 0; cells.forEach(([s, len]) => { eq(Number.isInteger(s) && Number.isInteger(len) && s >= end && len > 0 && s + len <= 16, id + " bar " + b + " cell [" + s + "," + len + "] overlaps or leaves the bar"); end = s + len; }); });
+      });
+    });
+    test("parts: validatePattern rejects bad patterns", (eq) => {
+      eq(PA.validatePattern("bass", "r..r").length > 0, "a short pattern was accepted");
+      eq(PA.validatePattern("bass", "r..r..r...r...x.").length > 0, "x in a bass pattern was accepted");
+      eq(PA.validatePattern("arp", "0.1.2.3.2.1.0.a.").length > 0, "a letter in an arp pattern was accepted");
+      eq(PA.validatePattern("nope", "x...x...x...x...").length > 0, "an unknown kind was accepted");
+      eq(PA.validatePattern("kick", "x...x...x...x...").length === 0, "a valid kick pattern was rejected");
+    });
+    test("parts: drum hits land on the pattern, with the right velocities and open flags (all patterns x 4 bars x 3 seeds)", (eq) => {
+      Object.keys(PA.PATTERNS).filter((k) => ["kick", "snare", "hat"].indexOf(k) !== -1).forEach((kind) => Object.keys(PA.PATTERNS[kind]).forEach((id) => {
+        const pat = PA.PATTERNS[kind][id].pat;
+        for (let bar = 0; bar < 4; bar++) for (let seed = 1; seed <= 3; seed++) {
+          const sl = slice16(pat, bar), ev = PA.drum({ rng: mulberry32(seed), pat, bar }), tag = kind + "." + id + " bar " + bar;
+          const want = []; for (let i = 0; i < 16; i++) if (sl[i] !== ".") want.push(i);
+          eq(J(ev.map((e) => e.s)) === J(want), tag + ": steps " + J(ev.map((e) => e.s)) + " vs " + J(want));
+          ev.forEach((e) => { const ch = sl[e.s]; eq(ch === "g" ? e.vel === 0.4 : (e.vel >= 0.85 && e.vel < 1), tag + ": velocity " + e.vel + " for '" + ch + "'"); eq(e.open === (ch === "o"), tag + ": open flag"); });
+          eq(J(ev) === J(PA.drum({ rng: mulberry32(seed), pat, bar })), tag + ": not deterministic for a given seed");
+        }
+      }));
+    });
+    test("parts: bass notes follow the pattern, the root is folded into [lo, lo+11], no overlaps (every key x chord type x root x pattern x register)", (eq) => {
+      Object.keys(T.CHORD_TYPES).forEach((t) => { for (let key = 0; key < 12; key++) for (const r of [0, 2, 3, 5, 7, 8, 10]) for (const lo of [36, 40]) Object.keys(PA.PATTERNS.bass).forEach((id) => {
+        const pat = PA.PATTERNS.bass[id].pat;
+        for (let bar = 0; bar < 2; bar++) {
+          const sl = slice16(pat, bar), ev = PA.bass({ key, chord: { r, t }, pat, bar, lo }), tag = "key " + key + " " + t + " r" + r + " " + id;
+          const want = []; for (let i = 0; i < 16; i++) if ("r5o".indexOf(sl[i]) !== -1) want.push(i);
+          eq(J(ev.map((e) => e.s)) === J(want), tag + ": steps " + J(ev.map((e) => e.s)) + " vs " + J(want));
+          ev.forEach((e, i) => {
+            const off = { r: 0, 5: 7, o: 12 }[sl[e.s]], root = e.midi - off, next = i + 1 < ev.length ? ev[i + 1].s : 16;
+            eq(root >= lo && root <= lo + 11 && mod12(root - (key + r)) === 0, tag + ": root " + root + " is wrong or outside [" + lo + "," + (lo + 11) + "]");
+            eq(Math.abs(e.len - (next - e.s) * 0.92) < 1e-9 && e.s + e.len <= next, tag + ": note at step " + e.s + " has length " + e.len + " (next hit at " + next + ")");
+            eq(e.vel === 1, tag + ": velocity");
+          });
+        }
+      }); });
+    });
+    test("parts: chords are the whole chord, struck at step 0, held for the bar", (eq) => {
+      Object.keys(T.CHORD_TYPES).forEach((t) => { for (let key = 0; key < 12; key++) for (const r of [0, 5, 8]) {
+        const ev = PA.chords({ key, chord: { r, t }, lo: 55 }), tag = "key " + key + " " + t + " r" + r;
+        eq(J(ev.map((e) => e.midi)) === J(T.chordMidi(key, { r, t }, 55)), tag + ": notes differ from theory.chordMidi");
+        eq(ev.every((e, i) => e.s === 0 && e.len === 16 && e.i === i && e.vel === 0.8), tag + ": step, length, index or velocity wrong");
+      } });
+    });
+    test("parts: arp notes index the chord's tones and wrap up an octave (independent formula)", (eq) => {
+      Object.keys(T.CHORD_TYPES).forEach((t) => { for (let key = 0; key < 12; key++) for (const r of [0, 3, 7, 10]) Object.keys(PA.PATTERNS.arp).forEach((id) => {
+        const pat = PA.PATTERNS.arp[id].pat, lo = 60;
+        for (let bar = 0; bar < 2; bar++) {
+          const sl = slice16(pat, bar), ev = PA.arp({ key, chord: { r, t }, pat, bar, lo }), tag = "key " + key + " " + t + " r" + r + " " + id;
+          const root = lo + mod12((key + r) - lo), tones = T.CHORD_TYPES[t].map((i) => root + i), want = [];
+          for (let s = 0; s < 16; s++) if (sl[s] !== ".") { const i = +sl[s]; want.push([s, tones[i % tones.length] + 12 * Math.floor(i / tones.length)]); }
+          eq(J(ev.map((e) => [e.s, e.midi])) === J(want), tag + ": notes " + J(ev.map((e) => [e.s, e.midi])) + " vs " + J(want));
+          eq(ev.every((e) => e.len === 1.5 && e.vel === 0.8 && T.chordPcs(key, { r, t }).indexOf(mod12(e.midi)) !== -1), tag + ": length, velocity or a note outside the chord");
+        }
+      }); });
+      let msg = ""; try { PA.arp({ key: 0, chord: { r: 0, t: "maj" }, pat: "0.1.2.3.2.1.0.x.", bar: 0 }); } catch (e) { msg = e.message; }
+      eq(msg.indexOf("x") !== -1, "a bad arp step should throw a readable error, got '" + msg + "'");
+    });
+    test("parts: melody stays in the scale and range, starts each bar on a chord tone, and steps or lands on chord tones (every key x scale x chord)", (eq) => {
+      const lo = 64, hi = 81;
+      Object.keys(T.SCALES).forEach((scale) => { for (let key = 0; key < 12; key++) for (const t of ["maj", "min", "min7", "maj9", "add9"]) for (const r of [0, 3, 5, 7, 8, 10]) Object.keys(PA.RHYTHMS).forEach((rid) => {
+        const pool = T.scaleMidi(key, scale, lo, hi), pcs = T.chordPcs(key, { r, t }), rhythm = PA.RHYTHMS[rid].bars;
+        const hasTones = pool.some((m) => pcs.indexOf(mod12(m)) !== -1);
+        for (let seed = 1; seed <= 2; seed++) {
+          const rng = mulberry32(seed), rng2 = mulberry32(seed); let last = null, last2 = null;
+          for (let bar = 0; bar < 4; bar++) {
+            const out = PA.melody({ rng, key, scale, chord: { r, t }, lo, hi, rhythm, bar, last }), tag = scale + " key " + key + " " + t + " r" + r + " " + rid + " bar " + bar;
+            const again = PA.melody({ rng: rng2, key, scale, chord: { r, t }, lo, hi, rhythm, bar, last: last2 });
+            eq(J(out) === J(again), tag + ": not deterministic for a given seed");
+            const cells = rhythm[bar % 2];
+            eq(J(out.events.map((e) => [e.s, e.len])) === J(cells.map((c) => [c[0], c[1] * 0.95])), tag + ": rhythm differs from the template");
+            eq(out.events.every((e) => pool.indexOf(e.midi) !== -1), tag + ": a note outside the scale or range");
+            eq(pcs.indexOf(mod12(out.events[0].midi)) !== -1 || !hasTones, tag + ": the first note is not a chord tone");
+            out.events.forEach((e, i) => { if (i) { const d = Math.abs(e.midi - out.events[i - 1].midi); eq(d <= 4 || pcs.indexOf(mod12(e.midi)) !== -1 || !hasTones, tag + ": a leap of " + d + " to a non-chord tone"); } });
+            eq(out.last === out.events[out.events.length - 1].midi, tag + ": `last` is not the final note");
+            last = out.last; last2 = again.last;
+          }
+        }
+      }); });
+      let msg = ""; try { PA.melody({ rng: mulberry32(1), key: 0, scale: "major", chord: { r: 0, t: "maj" }, lo: 64, hi: 70, rhythm: PA.RHYTHMS.lilt.bars, bar: 0, last: null }); } catch (e) { msg = e.message; }
+      eq(msg.indexOf("octave") !== -1, "a too-narrow range should throw a readable error, got '" + msg + "'");
+    });
+    test("parts: a chord with no tone in the scale still gives finite, in-scale notes (regression: used to produce undefined)", (eq) => {
+      const out = PA.melody({ rng: mulberry32(1), key: 0, scale: "major", chord: { r: 3, t: "min" }, lo: 64, hi: 81, rhythm: PA.RHYTHMS.lilt.bars, bar: 0, last: null }), pool = T.scaleMidi(0, "major", 64, 81);
+      eq(out.events.length === 3 && out.events.every((e) => Number.isFinite(e.midi) && pool.indexOf(e.midi) !== -1), "melody notes: " + J(out.events.map((e) => e.midi)));
+    });
+    test("parts: `at` picks the events on a step; parts are frozen", (eq) => {
+      const ev = [{ s: 0 }, { s: 4 }, { s: 4 }, { s: 9 }];
+      eq(PA.at(ev, 4).length === 2 && PA.at(ev, 1).length === 0, "at() returned the wrong events");
+      eq(Object.isFrozen(PA) && Object.isFrozen(PA.PATTERNS) && Object.isFrozen(PA.PATTERNS.bass.drive) && Object.isFrozen(PA.RHYTHMS.lilt.bars[0]), "parts are not frozen");
+    });
+  }
+  // ================= instruments =================
+  if (IN) {
+    test("instruments: every preset is valid and labelled", (eq) => {
+      IN.CATEGORIES.forEach((c) => { eq(Object.keys(IN.PRESETS[c] || {}).length > 0, c + " has no presets"); Object.keys(IN.PRESETS[c]).forEach((id) => {
+        const e = IN.PRESETS[c][id], bad = IN.validate(c, e.p); eq(!!e.label, c + "." + id + " has no label"); eq(bad.length === 0, c + "." + id + ": " + bad.join("; "));
+      }); });
+    });
+    test("instruments: validate catches bad presets", (eq) => {
+      const good = { osc: [{ type: "sine", gain: 1, detune: 0, mult: 1 }], gain: 0.5 };
+      eq(IN.validate("bass", good).length === 0, "a good preset was rejected: " + IN.validate("bass", good).join("; "));
+      const cases = [
+        ["bass", Object.assign({}, good, { wobble: 1 }), "an unknown field"],
+        ["bass", Object.assign({}, good, { gain: 5 }), "a gain above 1"],
+        ["bass", Object.assign({}, good, { osc: [] }), "no oscillators"],
+        ["bass", Object.assign({}, good, { osc: [1, 2, 3, 4, 5].map(() => good.osc[0]) }), "five oscillators"],
+        ["bass", Object.assign({}, good, { osc: [{ type: "noise", gain: 1, detune: 0, mult: 1 }] }), "an unknown waveform"],
+        ["pad", Object.assign({}, good, { vibrato: { rate: 5, depth: 500 } }), "an enormous vibrato"],
+        ["lead", Object.assign({}, good, { filter: { freq: 0 } }), "a filter at 0 Hz"],
+        ["lead", Object.assign({}, good, { amp: { s: 2 } }), "a sustain level above 1"],
+        ["kick", { f0: -5, f1: 40, sweep: 0.1, decay: 0.4, gain: 0.9 }, "a negative frequency"],
+        ["snare", { noiseFreq: 2000, decay: 0.2, gain: 0.4, tone: 190 }, "a tone without its decay and gain"],
+        ["hat", { freq: 7000, decay: 0, openDecay: 0.2, gain: 0.3 }, "a zero decay"],
+        ["nope", good, "an unknown category"]
+      ];
+      cases.forEach(([c, p, why]) => eq(IN.validate(c, p).length > 0, "validate accepted " + why));
+    });
+    test("instruments: make rejects unknown names (including inherited ones)", (eq) => {
+      const fake = { ctx: {}, noise: {}, rng: () => 0, applyShape: () => {} };
+      [["bass", "nope"], ["nope", "subSine"], ["bass", "toString"], ["constructor", "subSine"]].forEach(([c, id]) => {
+        let m = ""; try { IN.make(fake, {}, c, id); } catch (e) { m = e.message; }
+        eq(m.indexOf(id) !== -1 || m.indexOf(c) !== -1, "make(" + c + ", " + id + ") should throw a readable error, got '" + m + "'");
+      });
+    });
+    test("instruments: mtof agrees with theory.mtof for every MIDI note", (eq) => { for (let m = 0; m <= 127; m++) eq(IN.mtof(m) === T.mtof(m), "mtof(" + m + ") differs: " + IN.mtof(m) + " vs " + T.mtof(m)); });
+    test("instruments: frozen", (eq) => { eq(Object.isFrozen(IN) && Object.isFrozen(IN.PRESETS) && Object.isFrozen(IN.PRESETS.bass.subSine.p.osc[0]), "instruments are not frozen"); });
+  }
   return out;
 }
 
-const isExtra = (sc) => !!(sc.records || sc.fixtures || sc.noCore || sc.production);      // scenarios with no equivalent in the original app
+const isExtra = (sc) => !!(sc.records || sc.fixtures || sc.noCore || sc.production || sc.budget || sc.reportLoad || sc.libs);      // scenarios with no equivalent in the original app
 
 function runAll(file, only) {
   const html = fs.readFileSync(file, "utf8"), appDir = path.dirname(path.resolve(file));
@@ -676,6 +872,13 @@ if (cmd === "unit") {
   const r = unitTests(path.dirname(path.resolve(args[1] || "index.html")));
   r.forEach((u) => console.log((u.nbad ? "FAIL" : "PASS") + " " + u.name + " (" + u.n + " checks)" + (u.nbad ? " " + u.bad.join("; ") : "")));
   process.exit(r.some((u) => u.nbad) ? 1 : 0);
+} else if (cmd === "load") {
+  const sc = SCENARIOS.find((x) => x.name === args[1]);
+  if (!sc) { console.error("unknown scenario"); process.exit(2); }
+  const f = args[2] || "index.html";
+  const r = runScenario(sc, fs.readFileSync(f, "utf8"), path.dirname(path.resolve(f)));
+  console.log(sc.name + ": " + JSON.stringify(r.load));
+  r.problems.forEach((p) => console.log("  problem: " + p));
 } else if (cmd === "list") {
   SCENARIOS.forEach((s) => console.log(s.name));
 } else if (cmd === "dump") {

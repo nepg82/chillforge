@@ -4,7 +4,7 @@
    This file is two things at once: the Chillwave style, and the reference
    for how to build any other style ("record") for Chillforge.
 
-   Contract last verified against engine build 261105-1000.
+   Contract last verified against engine build 261107-1321.
 
    IF YOU ARE CLAUDE AND YOU WERE GIVEN THIS FILE TO BUILD A NEW STYLE
    ----------------------------------------------------------------------------
@@ -77,6 +77,9 @@
                 holding a gain node for EVERY channel id (the mixer drives those),
                 plus any other nodes your voices need. Called on every Start and
                 every style switch; the engine drops the old graph each time.
+                If the object you return has a dispose() method, the engine calls
+                it when the graph is torn down. Use it to stop anything you left
+                running (the toolbox's instruments need this; see a.lib below).
 
    OPTIONAL (default if omitted):
      selects    []  Pulldowns under the mixer: [{ id, label, def, options:
@@ -106,6 +109,9 @@
      swing      0. Fraction of a 16th by which odd steps are delayed (0.16 here).
      cutoffMul  1. Multiplies the master lowpass cutoff (2500 Hz). Above 1 opens
                 the highs for brighter styles.
+     needs      none. A list of toolbox names the record cannot work without, e.g.
+                ["theory", "instruments", "parts"]. If one did not load, the record
+                is skipped with a log line instead of crashing later.
      keyed      false. true = a KEYED style: the engine adds a Key pulldown (C to B),
                 saves the choice with the style's settings, gives you a.S.key (0-11,
                 0 = C), and picks a new random key for every Radio track (never the
@@ -135,13 +141,20 @@
                       changing waveform does not change volume.
      a.noise          shared 3-second mono white-noise AudioBuffer. Play it with
                       createBufferSource, starting at a random offset.
-     a.lib            the shared toolbox (files in lib/). a.lib.theory has scales, chord
-                      types, KEY_NAMES, mtof(midi), fold(pc, lo), chordMidi(key, {r, t},
-                      lo), chordPcs and scaleMidi; read the header of lib/theory.js.
+     a.lib            the shared toolbox (files in lib/). Read each file's own header.
+                      a.lib.theory       scales, chord types, KEY_NAMES, mtof, fold,
+                                         chordMidi(key, {r, t}, lo), chordPcs, scaleMidi.
+                      a.lib.instruments  sound generators driven by preset data:
+                                         env(a), make(e, out, category, id), PRESETS.
+                      a.lib.parts        chord + key + pattern -> the note events of one
+                                         bar: drum, bass, chords, arp, melody, PATTERNS.
                       For a KEYED style, write chords as { r, t } (r = semitones above
                       the key, t = chord type) so one progression works in every key,
                       and give each instrument its own register through `lo`.
-                      records/pulse.js is the working example. Never reach for the
+                      The usual shape: onBar asks the PARTS for this bar's events and
+                      keeps them; onStep plays the ones on this step through the
+                      INSTRUMENTS. records/pulse.js is the working example of all three.
+                      List the toolbox files you use in `needs`. Never reach for the
                       toolbox any other way (a record is tested without the engine).
 
    5. TIMING
@@ -155,6 +168,9 @@
    ----------------------------------------------------------------------------
    - Create nodes per note and connect them into a.nodes.<channel>. EVERY
      oscillator or buffer source needs a .stop(...) so it is freed.
+   - Prefer the toolbox's instruments to hand-built voices: they share filters and
+     one vibrato oscillator instead of building them per note, which matters on a
+     phone. Anything that keeps running (a shared LFO) must be stopped in dispose().
    - Channel gain nodes belong to the engine's mixer. Do not set their gain.
      To silence a channel, skip its notes (a.muted), do not touch the gain.
    - Master chain after `bus`: lowpass (2500 Hz x cutoffMul) -> compressor
@@ -210,7 +226,8 @@
    - Save it as records/<name>.js.
    - In index.html add <script src="records/<name>.js"></script> after
      chillwave's tag and before the large inline script. Toolbox files (lib/) are
-     listed first; a new toolbox file also goes in APP_SHELL. Tag order is the Style
+     listed first (theory, then instruments, then parts); a new toolbox file also
+     goes in APP_SHELL and in the harness's LIBS list. Tag order is the Style
      dropdown order, and the FIRST record is the default style, so Chillwave
      stays first.
    - Add it to APP_SHELL in service-worker.js if it should work offline right
@@ -226,8 +243,15 @@
    With the trace harness (trace.js), add scenarios to SCENARIOS such as
      { name: "mystyle-basic", seed: 1, duration: 40, records: ["records/mystyle.js"],
        setup: (h) => h.select("styleSelect", "mystyle") }
-   then run:  node trace.js record-extra index.html   (saves the answer key)
-              node trace.js check index.html          (compares against it)
+   then run:  node tools/trace.js record-extra index.html   (saves the answer key)
+              node tools/trace.js check index.html          (compares against it)
+   Useful scenario fields: verify: (text) => [problems] (musical checks on the
+   trace), budget: { oscPerSec, peakOsc, noteFiltersPerSec } (fails if the style asks
+   the audio engine for more; `node tools/trace.js load <scenario>` prints the
+   numbers), checkSaved (what was really saved), libs (load only some toolbox
+   files). `node tools/trace.js unit` tests the toolbox. Reference load: Chillwave
+   today ~4.4 oscillators/s, peak 15 at once; Pulse's defaults ~11.6/s, peak 11,
+   ~5 per-note filters/s. (Synth Radio glitched on the phone at ~13/s, peak ~50.)
    The harness replays the app with a fake audio system and a seeded random
    generator and records every audio call, so any later change shows up as a
    diff. It also lints record files for top-level declarations and checks that
@@ -250,8 +274,8 @@
    engine's), private state, the voices (noiseHit, kick, snare, hat, pad,
    melody), the drum pattern, then the `rec` object: data fields, progressions,
    buildGraph, onTempo, radio, phraseBars, trackTitle, onBar, onStep, reset.
-   records/pulse.js is a much smaller example (a kick and a bass note, with keys)
-   and is the better template for a simple style.
+   records/pulse.js is the working example of the toolbox (instruments and parts),
+   keys and Radio, and the better template for a new style.
    ============================================================================ */
 
 (window.CHILLFORGE_RECORDS = window.CHILLFORGE_RECORDS || []).push(["chillwave", (() => {

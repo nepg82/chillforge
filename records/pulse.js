@@ -1,114 +1,165 @@
 // ---------------------------------------------------------------------------
-// RECORD: Pulse (test)
-// A deliberately small second style: a four-on-the-floor kick and a bass note.
-// It exists to prove a style can be added as a separate file with no engine edits,
-// and (since build 261105-1000) to prove KEYS: it declares `keyed: true`, so the
-// engine adds a Key pulldown, saves it, picks a new random key for each Radio
-// track, and hands this record the current key as a.S.key.
+// RECORD: Pulse (test bench)
+// Pulse exists to prove and to audition the toolbox. Every sound and every pattern
+// is a pulldown, so you can hear each ingredient on its own:
+//   kick, snare, hats (a.lib.instruments)   bass, arp, lead (instruments + a.lib.parts)
+// It is keyed (the engine adds a Key pulldown, saves it, and picks a new random key per
+// Radio track) and it NEEDS the toolbox, so the loader refuses it if a lib file is missing.
 //
-// Chords are { r, t }: r = root in semitones above the key, t = a chord type from
-// a.lib.theory.CHORD_TYPES. So "Pump" below works in all 12 keys. The bass root is
-// folded into one fixed register (MIDI 40-51, about 82-164 Hz) in every key, so it
-// never drifts out of what a phone speaker can reproduce.
+// How it works, bar by bar:
+//   onBar  asks the PARTS for this bar's note events (from the chord, the key, the
+//          chosen pattern) and keeps them;
+//   onStep plays the events that fall on this step through the INSTRUMENTS.
 //
-// Note the channel ids (kick, bass): the engine must not care what they are called.
+// Chords are { r, t }: r = root in semitones above the key, t = a chord type. Each
+// instrument has its own register: bass roots fold into MIDI 40-51 (about 82-164 Hz,
+// what a phone speaker can reproduce), the arp starts at middle C, the lead lives in
+// MIDI 64-81.
+//
 // To remove this style from the app: delete its <script> tag in index.html.
 // ---------------------------------------------------------------------------
 (window.CHILLFORGE_RECORDS = window.CHILLFORGE_RECORDS || []).push(["pulse", (() => {
 
-  const SHAPES = [
-    ["sine",     "Sine (Pure/Deep)"],
-    ["triangle", "Triangle (Warm/Soft)"],
-    ["sawtooth", "Sawtooth (Bright/Buzzy)"],
-    ["square",   "Square (Hollow/Retro)"]
-  ];
-  const BASS_LO = 40;                                // bass root is folded into MIDI 40..51
-
   const c = (r, t) => ({ r, t });
-  let root = null;                                   // this bar's bass note (MIDI)
+
+  // Option lists. The ids are the toolbox's preset / pattern ids (the harness plays every one).
+  const KICKS     = [["softThump", "Soft Thump"], ["deepTape", "Deep Tape"], ["punchy", "Punchy"]];
+  const SNARES    = [["softSnare", "Soft Snare"], ["clap", "Clap"], ["rim", "Rim"]];
+  const HATS      = [["crisp", "Crisp"], ["dusty", "Dusty"]];
+  const BASSES    = [["subSine", "Sub Sine"], ["warmSaw", "Warm Saw"], ["pluck", "Pluck"]];
+  const BASS_LINE = [["drive", "Drive"], ["walk", "Walk"], ["octave", "Octave"]];
+  const ARPS      = [["pluck", "Pluck"], ["glassy", "Glassy"], ["softSquare", "Soft Square"]];
+  const ARP_LINE  = [["upDown", "Up and down"], ["skip", "Skip"], ["run", "Run (busy)"], ["wide", "Wide"]];
+  const LEADS     = [["softSaw", "Soft Saw"], ["dreamySquare", "Dreamy Square"], ["bellPluck", "Bell Pluck"], ["tapeSine", "Tape Sine"]];
+  const LEAD_RHY  = [["lilt", "Lilt"], ["drift", "Drift"], ["sway", "Sway"]];
+
+  const BASS_LO = 40, ARP_LO = 60, LEAD_LO = 64, LEAD_HI = 81;
+
+  // slot -> [instrument category, which pulldown picks its preset, which channel it feeds]
+  const SLOTS = {
+    kick:  ["kick",  "kickSound",  "kick"],
+    snare: ["snare", "snareSound", "perc"],
+    hat:   ["hat",   "hatSound",   "perc"],
+    bass:  ["bass",  "bassSound",  "bass"],
+    arp:   ["arp",   "arpSound",   "arp"],
+    lead:  ["lead",  "leadSound",  "lead"]
+  };
+
+  let inst = null;                 // the instruments of the current graph
+  let ids = null;                  // the preset id each one was built from
+  let ev = null;                   // this bar's note events
+  let lastLead = null;             // the lead's previous note (the melody continues across bars)
 
   // Lock-screen name of a progression: the text in parentheses in its label.
   const progName = (k) => (rec.progs[k].label.match(/\(([^)]+)\)/) || [0, k])[1];
 
-  function kick(a, t, vel) {
-    const o = a.ctx.createOscillator();
-    const gn = a.ctx.createGain();
-    o.type = "sine";
-    o.frequency.setValueAtTime(150, t);
-    o.frequency.exponentialRampToValueAtTime(45, t + 0.1);
-    gn.gain.setValueAtTime(0.0001, t);
-    gn.gain.exponentialRampToValueAtTime(0.6 * vel, t + 0.004);
-    gn.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
-    o.connect(gn).connect(a.nodes.kick);
-    o.start(t);
-    o.stop(t + 0.4);
-  }
-
-  function bass(a, t, midi, steps) {
-    const shape = a.S.sel.bassShape;
-    const dur = steps * a.stepDur();
-    const peak = 0.35 * a.shapeLevel[shape];
-    const o = a.ctx.createOscillator();
-    const gn = a.ctx.createGain();
-    a.applyShape(o, shape);
-    o.frequency.value = a.lib.theory.mtof(midi);
-    gn.gain.setValueAtTime(0.0001, t);
-    gn.gain.linearRampToValueAtTime(peak, t + 0.01);
-    gn.gain.setTargetAtTime(0, t + dur - 0.05, 0.08);
-    o.connect(gn).connect(a.nodes.bass);
-    o.start(t);
-    o.stop(t + dur + 0.6);
+  // (Re)build any instrument whose pulldown changed. Runs at graph build and at every bar line.
+  function sync(a, nodes, mine, mineIds) {
+    const I = a.lib.instruments;
+    let e = null;
+    Object.keys(SLOTS).forEach((slot) => {
+      const want = a.S.sel[SLOTS[slot][1]];
+      if (mine[slot] && mineIds[slot] === want) return;
+      if (mine[slot]) mine[slot].dispose();
+      e = e || I.env(a);
+      mine[slot] = I.make(e, nodes[SLOTS[slot][2]], SLOTS[slot][0], want);
+      mineIds[slot] = want;
+    });
   }
 
   const rec = {
-    label: "Pulse (test)",
+    label: "Pulse (test bench)",
     keyed: true,
+    needs: ["theory", "instruments", "parts"],
     bpm: { min: 90, def: 110, max: 130 },
+    swing: 0.1,
+    cutoffMul: 1.5,                 // opens the highs for the arp and hats; 1 is darker
 
     channels: [
       { id: "kick", label: "Kick", max: 6, def: 0 },
-      { id: "bass", label: "Bass", max: 6, def: 0 }
+      { id: "perc", label: "Perc", max: 6, def: -4 },
+      { id: "bass", label: "Bass", max: 6, def: 0 },
+      { id: "arp",  label: "Arp",  max: 6, def: -6 },
+      { id: "lead", label: "Lead", max: 6, def: -3 }
     ],
+
     selects: [
-      { id: "bassShape", label: "Bass", def: "sine", options: SHAPES, radio: ["sine", "triangle"] }
+      { id: "kickSound",  label: "Kick",        def: "softThump", options: KICKS },
+      { id: "snareSound", label: "Snare",       def: "softSnare", options: SNARES },
+      { id: "hatSound",   label: "Hats",        def: "crisp",     options: HATS },
+      { id: "bassSound",  label: "Bass",        def: "subSine",   options: BASSES },
+      { id: "bassLine",   label: "Bass line",   def: "drive",     options: BASS_LINE },
+      { id: "arpSound",   label: "Arp",         def: "pluck",     options: ARPS },
+      { id: "arpLine",    label: "Arp line",    def: "upDown",    options: ARP_LINE, radio: ["upDown", "skip", "wide"] },
+      { id: "leadSound",  label: "Lead",        def: "softSaw",   options: LEADS },
+      { id: "leadRhythm", label: "Lead rhythm", def: "lilt",      options: LEAD_RHY }
     ],
+
     progs: {
-      pump: { label: "i - \u266dVI - \u266dIII - \u266dVII (Pump)", chords: [c(0, "min"), c(8, "maj"), c(3, "maj"), c(10, "maj")] },
-      rise: { label: "i - \u266dVII - \u266dVI - V (Rise)",        chords: [c(0, "min"), c(10, "maj"), c(8, "maj"), c(7, "maj")] }
+      pump:   { label: "i - \u266dVI - \u266dIII - \u266dVII (Pump)",             scale: "minor", chords: [c(0, "min"), c(8, "maj"), c(3, "maj"), c(10, "maj")] },
+      rise:   { label: "i - \u266dVII - \u266dVI - V (Rise)",                     scale: "minor", chords: [c(0, "min"), c(10, "maj"), c(8, "maj"), c(7, "maj")] },
+      dream:  { label: "i9 - \u266dVImaj7 - \u266dIIImaj7 - \u266dVIIadd9 (Hazy Dream)", scale: "minor", chords: [c(0, "min9"), c(8, "maj7"), c(3, "maj7"), c(10, "add9")] },
+      sunset: { label: "Imaj7 - IVmaj7 - vi7 - Vadd9 (Sunset Drive)",             scale: "major", chords: [c(0, "maj7"), c(5, "maj7"), c(9, "min7"), c(7, "add9")] }
     },
 
     buildGraph(a, bus) {
       const n = {};
-      n.kick = a.ctx.createGain(); n.kick.connect(bus);
-      n.bass = a.ctx.createGain(); n.bass.connect(bus);
+      ["kick", "perc", "bass", "arp", "lead"].forEach((id) => { n[id] = a.ctx.createGain(); n[id].connect(bus); });
+      const mine = {}, mineIds = {};
+      inst = mine; ids = mineIds;
+      sync(a, n, mine, mineIds);
+      n.dispose = () => { Object.keys(mine).forEach((k) => mine[k] && mine[k].dispose()); };   // the engine calls this on teardown
       return n;
     },
 
     trackTitle(S, a) {
-      return rec.label + " \u00b7 " + a.lib.theory.KEY_NAMES[S.key] + " \u00b7 " + progName(S.prog);
+      return "Pulse (test) \u00b7 " + a.lib.theory.KEY_NAMES[S.key] + " \u00b7 " + progName(S.prog);
     },
 
     onBar(a, t, bar) {
-      const chords = rec.progs[a.S.prog].chords;
-      root = a.lib.theory.chordMidi(a.S.key, chords[bar % chords.length], BASS_LO)[0];
+      const P = a.lib.parts, S = a.S, sel = S.sel, pt = P.PATTERNS;
+      sync(a, a.nodes, inst, ids);
+      const prog = rec.progs[S.prog], chord = prog.chords[bar % prog.chords.length], key = S.key;
+      const lead = P.melody({ rng: a.rng, key, scale: prog.scale, chord, lo: LEAD_LO, hi: LEAD_HI, rhythm: P.RHYTHMS[sel.leadRhythm].bars, bar, last: lastLead });
+      lastLead = lead.last;                                      // keep the melody going even while the lead is muted
+      ev = {
+        kick:  P.drum({ rng: a.rng, pat: pt.kick.fourFloor.pat, bar }),
+        snare: P.drum({ rng: a.rng, pat: pt.snare.backbeat.pat, bar }),
+        hat:   P.drum({ rng: a.rng, pat: pt.hat.eighths.pat, bar }),
+        bass:  P.bass({ key, chord, pat: pt.bass[sel.bassLine].pat, bar, lo: BASS_LO }),
+        arp:   P.arp({ key, chord, pat: pt.arp[sel.arpLine].pat, bar, lo: ARP_LO }),
+        lead:  lead.events
+      };
     },
 
     onStep(a, s, t) {
-      if (s % 4 === 0 && !a.muted("kick")) kick(a, t, s === 0 ? 1 : 0.85);
-      if (root !== null && (s === 0 || s === 8) && !a.muted("bass")) bass(a, t, root, 8);
+      if (!ev) return;
+      const P = a.lib.parts, sd = a.stepDur();
+      if (!a.muted("kick")) P.at(ev.kick, s).forEach((e) => inst.kick.play(t, e.vel));
+      if (!a.muted("perc")) {
+        P.at(ev.snare, s).forEach((e) => inst.snare.play(t, e.vel));
+        P.at(ev.hat, s).forEach((e) => inst.hat.play(t, e.vel, e.open));
+      }
+      if (!a.muted("bass")) P.at(ev.bass, s).forEach((e) => inst.bass.play(t, e.midi, e.len * sd, e.vel));
+      if (!a.muted("arp"))  P.at(ev.arp,  s).forEach((e) => inst.arp.play(t, e.midi, e.len * sd, e.vel));
+      if (!a.muted("lead")) P.at(ev.lead, s).forEach((e) => inst.lead.play(t, e.midi, e.len * sd, e.vel));
     },
 
-    // Radio: step to the other progression and drift the tempo a little each track.
+    // Radio: step to the next progression, drift the tempo, and reroll the sounds.
     // (The engine has already picked a new random key for the track.)
     radio: {
       nextTrack(a) {
         const keys = Object.keys(rec.progs);
         a.S.prog = keys[(keys.indexOf(a.S.prog) + 1) % keys.length];
         a.S.bpm = a.clamp(a.S.bpm + (a.rng() < 0.5 ? -4 : 4), rec.bpm.min, rec.bpm.max);
+        rec.selects.forEach((s) => {
+          const pool = (s.radio || s.options.map((o) => o[0])).filter((v) => v !== a.S.sel[s.id]);
+          if (pool.length) a.S.sel[s.id] = pool[Math.floor(a.rng() * pool.length)];
+        });
       }
     },
 
-    reset() { root = null; }
+    reset() { ev = null; lastLead = null; }
   };
   return rec;
 })()]);
