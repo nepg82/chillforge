@@ -9,19 +9,11 @@ Last updated: engine build **261107-1321**, after Step 9. Next: Step 10.
 
 ## 1. What this is
 
-Chillforge is a generative lo-fi / chillhop beat maker, built as an installable web app (PWA) and
-hosted on GitHub Pages. One HTML page plus small script files; no build step, no libraries.
-The user tests on a real phone: **Android, using the Brave browser** (Chromium-based, so the same Web Audio and
-Media Session engine as Chrome), installing the PWA through Brave. Tests often last 30+ minutes, with the screen
-locked, over Bluetooth and the lock-screen controls.
-
-Phone audio is fragile. The code that keeps playback alive on a phone is the most valuable thing in the project.
+Chillforge is a generative lo-fi / chillhop beat maker, built as an installable web app (PWA) and hosted on GitHub Pages. One HTML page plus small script files; no build step, no libraries. The user tests on a real phone: **Android, using the Brave browser** (Chromium-based, so the same Web Audio and Media Session engine as Chrome), installing the PWA through Brave. Tests often last 30+ minutes, with the screen locked, over Bluetooth and the lock-screen controls. Phone audio is fragile. The code that keeps playback alive on a phone is the most valuable thing in the project.
 
 ## 2. The idea: a jukebox, its records, and a toolbox
 
-- **Engine** (`index.html`, the big inline script): audio context lifecycle and phone survival, the scheduler
-  (16 steps per bar, 4/4), master chain, mixer, saved settings, the UI (built from record data), Radio mechanics,
-  lock-screen controls, the record loader. It knows nothing about any particular style.
+- **Engine** (`index.html`, the big inline script): audio context lifecycle and phone survival, the scheduler (16 steps per bar, 4/4), master chain, mixer, saved settings, the UI (built from record data), Radio mechanics, lock-screen controls, the record loader. It knows nothing about any particular style.
 - **Records** (`records/*.js`): one file per style. Everything that makes a style sound like itself.
 - **Toolbox** (`lib/*.js`): shared, style-agnostic building blocks. Records reach it as `a.lib`:
   - `lib/theory.js`: scales, chord types, key names, folding a root into a register, mtof.
