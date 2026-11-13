@@ -3,6 +3,10 @@
 // Pulse exists to prove and to audition the toolbox. Every sound and every pattern
 // is a pulldown, so you can hear each ingredient on its own:
 //   kick, snare, hats (a.lib.instruments)   bass, arp, lead (instruments + a.lib.parts)
+//   OCTAVES: each of bass, arp and lead can get a low layer (one extra oscillator an octave
+//            below every note) or be dropped an octave
+//   CHARACTER (a.lib.fx, built once, nearly free): width (stereo placement), space (a short
+//            room), warmth (soft saturation), motion (slow pitch drift and filter sweep)
 // It is keyed (the engine adds a Key pulldown, saves it, and picks a new random key per
 // Radio track) and it NEEDS the toolbox, so the loader refuses it if a lib file is missing.
 //
@@ -32,45 +36,71 @@
   const ARP_LINE  = [["upDown", "Up and down"], ["skip", "Skip"], ["run", "Run (busy)"], ["wide", "Wide"]];
   const LEADS     = [["softSaw", "Soft Saw"], ["dreamySquare", "Dreamy Square"], ["bellPluck", "Bell Pluck"], ["tapeSine", "Tape Sine"]];
   const LEAD_RHY  = [["lilt", "Lilt"], ["drift", "Drift"], ["sway", "Sway"]];
+  const BASS_OCT  = [["normal", "Normal"], ["layerTri", "+ Low triangle"], ["layerSine", "+ Low sine"], ["down", "Down an octave"]];
+  const OCT       = [["normal", "Normal"], ["layer", "+ Low layer"], ["down", "Down an octave"]];
+  const WIDTH     = [["off", "Off"], ["gentle", "Gentle"], ["wide", "Wide"]];
+  const SPACE     = [["off", "Off"], ["room", "Room"], ["hall", "Hall"]];
+  const WARMTH    = [["off", "Off"], ["soft", "Soft"], ["tape", "Tape"]];
+  const MOTION    = [["off", "Off"], ["drift", "Drift"], ["sweep", "Sweep"], ["both", "Both"]];
 
   const BASS_LO = 40, ARP_LO = 60, LEAD_LO = 64, LEAD_HI = 81;
 
-  // slot -> [instrument category, which pulldown picks its preset, which channel it feeds]
+  const IDS = ["kick", "perc", "bass", "arp", "lead"];
+  // slot -> [instrument category, the pulldown that picks its preset, the pulldown that picks its octave (or null), the channel it feeds]
   const SLOTS = {
-    kick:  ["kick",  "kickSound",  "kick"],
-    snare: ["snare", "snareSound", "perc"],
-    hat:   ["hat",   "hatSound",   "perc"],
-    bass:  ["bass",  "bassSound",  "bass"],
-    arp:   ["arp",   "arpSound",   "arp"],
-    lead:  ["lead",  "leadSound",  "lead"]
+    kick:  ["kick",  "kickSound",  null,         "kick"],
+    snare: ["snare", "snareSound", null,         "perc"],
+    hat:   ["hat",   "hatSound",   null,         "perc"],
+    bass:  ["bass",  "bassSound",  "bassOctave", "bass"],
+    arp:   ["arp",   "arpSound",   "arpOctave",  "arp"],
+    lead:  ["lead",  "leadSound",  "leadOctave", "lead"]
   };
+  const LOW = { layerTri: { type: "triangle", gain: 0.7 }, layerSine: { type: "sine", gain: 0.7 }, layer: { type: "triangle", gain: 0.6 } };
+
+  // Character amounts (0 to 1) for each pulldown choice
+  const AMT = { off: 0, gentle: 0.5, room: 0.5, soft: 0.5, wide: 1, hall: 1, tape: 1 };
+  const MOTION_AMT = { off: { drift: 0, sweep: 0 }, drift: { drift: 0.6, sweep: 0 }, sweep: { drift: 0, sweep: 0.6 }, both: { drift: 0.6, sweep: 0.6 } };
+  const fxAmounts = (sel) => ({ width: AMT[sel.width], space: AMT[sel.space], warmth: AMT[sel.warmth], drift: MOTION_AMT[sel.motion].drift, sweep: MOTION_AMT[sel.motion].sweep });
+  // taste settings that Radio leaves alone when it rerolls the sounds
+  const KEEP = ["bassOctave", "arpOctave", "leadOctave", "width", "space", "warmth", "motion"];
+  const down = (sel, id) => (sel[id] === "down" ? -12 : 0);
 
   let inst = null;                 // the instruments of the current graph
-  let ids = null;                  // the preset id each one was built from
+  let ids = null;                  // the preset + octave each one was built from
+  let fx = null;                   // the character stage of the current graph
+  let lastFx = null;               // the amounts it was last set to
   let ev = null;                   // this bar's note events
   let lastLead = null;             // the lead's previous note (the melody continues across bars)
 
   // Lock-screen name of a progression: the text in parentheses in its label.
   const progName = (k) => (rec.progs[k].label.match(/\(([^)]+)\)/) || [0, k])[1];
 
-  // (Re)build any instrument whose pulldown changed. Runs at graph build and at every bar line.
+  // (Re)build any instrument whose sound or octave pulldown changed. Runs at graph build and at every bar line.
   function sync(a, nodes, mine, mineIds) {
-    const I = a.lib.instruments;
+    const I = a.lib.instruments, sel = a.S.sel;
     let e = null;
     Object.keys(SLOTS).forEach((slot) => {
-      const want = a.S.sel[SLOTS[slot][1]];
+      const [category, soundSel, octSel, channel] = SLOTS[slot];
+      const oct = octSel ? sel[octSel] : null, want = sel[soundSel] + "|" + (oct || "");
       if (mine[slot] && mineIds[slot] === want) return;
       if (mine[slot]) mine[slot].dispose();
-      e = e || I.env(a);
-      mine[slot] = I.make(e, nodes[SLOTS[slot][2]], SLOTS[slot][0], want);
+      if (!e) { e = I.env(a); e.drift = fx.drift; }
+      mine[slot] = I.make(e, nodes[channel], category, sel[soundSel], oct && LOW[oct] ? { low: LOW[oct] } : undefined);
       mineIds[slot] = want;
     });
+  }
+
+  // Move the character stage to the amounts the pulldowns ask for (only when they changed).
+  function syncFx(a) {
+    const amt = fxAmounts(a.S.sel), k = JSON.stringify(amt);
+    if (k === lastFx) return;
+    fx.set(amt); lastFx = k;
   }
 
   const rec = {
     label: "Pulse (test bench)",
     keyed: true,
-    needs: ["theory", "instruments", "parts"],
+    needs: ["theory", "instruments", "parts", "fx"],
     bpm: { min: 90, def: 110, max: 130 },
     swing: 0.1,
     cutoffMul: 1.5,                 // opens the highs for the arp and hats; 1 is darker
@@ -92,7 +122,14 @@
       { id: "arpSound",   label: "Arp",         def: "pluck",     options: ARPS },
       { id: "arpLine",    label: "Arp line",    def: "upDown",    options: ARP_LINE, radio: ["upDown", "skip", "wide"] },
       { id: "leadSound",  label: "Lead",        def: "softSaw",   options: LEADS },
-      { id: "leadRhythm", label: "Lead rhythm", def: "lilt",      options: LEAD_RHY }
+      { id: "leadRhythm", label: "Lead rhythm", def: "lilt",      options: LEAD_RHY },
+      { id: "bassOctave", label: "Bass octave", def: "layerTri",  options: BASS_OCT },
+      { id: "arpOctave",  label: "Arp octave",  def: "normal",    options: OCT },
+      { id: "leadOctave", label: "Lead octave", def: "layer",     options: OCT },
+      { id: "width",      label: "Width",       def: "gentle",    options: WIDTH },
+      { id: "space",      label: "Space",       def: "room",      options: SPACE },
+      { id: "warmth",     label: "Warmth",      def: "soft",      options: WARMTH },
+      { id: "motion",     label: "Motion",      def: "drift",     options: MOTION }
     ],
 
     progs: {
@@ -104,11 +141,18 @@
 
     buildGraph(a, bus) {
       const n = {};
-      ["kick", "perc", "bass", "arp", "lead"].forEach((id) => { n[id] = a.ctx.createGain(); n[id].connect(bus); });
+      IDS.forEach((id) => { n[id] = a.ctx.createGain(); });          // the mixer's channel gains come first
+      const mineFx = a.lib.fx.create(a.lib.instruments.env(a), bus, {
+        channels: IDS,
+        pan:  { perc: 0.3, arp: -0.6, lead: 0.6 },                    // base placement; the Width pulldown scales it
+        send: { perc: 0.25, arp: 0.5, lead: 0.6 },                    // how much of each channel feeds the space
+        initial: fxAmounts(a.S.sel)
+      });
+      IDS.forEach((id) => n[id].connect(mineFx.input(id)));
       const mine = {}, mineIds = {};
-      inst = mine; ids = mineIds;
+      inst = mine; ids = mineIds; fx = mineFx; lastFx = JSON.stringify(fxAmounts(a.S.sel));
       sync(a, n, mine, mineIds);
-      n.dispose = () => { Object.keys(mine).forEach((k) => mine[k] && mine[k].dispose()); };   // the engine calls this on teardown
+      n.dispose = () => { Object.keys(mine).forEach((k) => mine[k] && mine[k].dispose()); mineFx.dispose(); };   // the engine calls this on teardown
       return n;
     },
 
@@ -119,15 +163,16 @@
     onBar(a, t, bar) {
       const P = a.lib.parts, S = a.S, sel = S.sel, pt = P.PATTERNS;
       sync(a, a.nodes, inst, ids);
+      syncFx(a);
       const prog = rec.progs[S.prog], chord = prog.chords[bar % prog.chords.length], key = S.key;
-      const lead = P.melody({ rng: a.rng, key, scale: prog.scale, chord, lo: LEAD_LO, hi: LEAD_HI, rhythm: P.RHYTHMS[sel.leadRhythm].bars, bar, last: lastLead });
+      const lead = P.melody({ rng: a.rng, key, scale: prog.scale, chord, lo: LEAD_LO + down(sel, "leadOctave"), hi: LEAD_HI + down(sel, "leadOctave"), rhythm: P.RHYTHMS[sel.leadRhythm].bars, bar, last: lastLead });
       lastLead = lead.last;                                      // keep the melody going even while the lead is muted
       ev = {
         kick:  P.drum({ rng: a.rng, pat: pt.kick.fourFloor.pat, bar }),
         snare: P.drum({ rng: a.rng, pat: pt.snare.backbeat.pat, bar }),
         hat:   P.drum({ rng: a.rng, pat: pt.hat.eighths.pat, bar }),
-        bass:  P.bass({ key, chord, pat: pt.bass[sel.bassLine].pat, bar, lo: BASS_LO }),
-        arp:   P.arp({ key, chord, pat: pt.arp[sel.arpLine].pat, bar, lo: ARP_LO }),
+        bass:  P.bass({ key, chord, pat: pt.bass[sel.bassLine].pat, bar, lo: BASS_LO + down(sel, "bassOctave") }),
+        arp:   P.arp({ key, chord, pat: pt.arp[sel.arpLine].pat, bar, lo: ARP_LO + down(sel, "arpOctave") }),
         lead:  lead.events
       };
     },
@@ -153,6 +198,7 @@
         a.S.prog = keys[(keys.indexOf(a.S.prog) + 1) % keys.length];
         a.S.bpm = a.clamp(a.S.bpm + (a.rng() < 0.5 ? -4 : 4), rec.bpm.min, rec.bpm.max);
         rec.selects.forEach((s) => {
+          if (KEEP.indexOf(s.id) !== -1) return;
           const pool = (s.radio || s.options.map((o) => o[0])).filter((v) => v !== a.S.sel[s.id]);
           if (pool.length) a.S.sel[s.id] = pool[Math.floor(a.rng() * pool.length)];
         });

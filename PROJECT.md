@@ -3,22 +3,36 @@
 **Read this first, in a new conversation.** It is the memory the assistant does not have.
 Keep it current: update it at the end of every step and ship it in the project zip.
 
-Last updated: engine build **261107-1321**, after Step 9. Next: Step 10.
+Last updated: engine build **261111-2105**, after Step 9a. Next: Step 10.
 
 ---
 
 ## 1. What this is
 
-Chillforge is a generative lo-fi / chillhop beat maker, built as an installable web app (PWA) and hosted on GitHub Pages. One HTML page plus small script files; no build step, no libraries. The user tests on a real phone: **Android, using the Brave browser** (Chromium-based, so the same Web Audio and Media Session engine as Chrome), installing the PWA through Brave. Tests often last 30+ minutes, with the screen locked, over Bluetooth and the lock-screen controls. Phone audio is fragile. The code that keeps playback alive on a phone is the most valuable thing in the project.
+Chillforge is a generative lo-fi / chillhop beat maker, built as an installable web app (PWA) and
+hosted on GitHub Pages. One HTML page plus small script files; no build step, no libraries.
+The user tests on a real phone: **Android, using the Brave browser** (Chromium-based, so the same Web Audio and
+Media Session engine as Chrome), installing the PWA through Brave. Tests often last 30+ minutes, with the screen
+locked, over Bluetooth and the lock-screen controls.
+
+**How the user listens: almost exclusively on Bluetooth bone-conduction headphones**, which are not big bass drivers
+but can handle a little bass. Design low frequencies for that: a pure sine below ~60 Hz is weak; a triangle or soft saw
+carries a low note through its overtones. (Phone speakers barely reproduce anything below ~150 Hz.)
+
+Phone audio is fragile. The code that keeps playback alive on a phone is the most valuable thing in the project.
 
 ## 2. The idea: a jukebox, its records, and a toolbox
 
-- **Engine** (`index.html`, the big inline script): audio context lifecycle and phone survival, the scheduler (16 steps per bar, 4/4), master chain, mixer, saved settings, the UI (built from record data), Radio mechanics, lock-screen controls, the record loader. It knows nothing about any particular style.
+- **Engine** (`index.html`, the big inline script): audio context lifecycle and phone survival, the scheduler
+  (16 steps per bar, 4/4), master chain, mixer, saved settings, the UI (built from record data), Radio mechanics,
+  lock-screen controls, the record loader. It knows nothing about any particular style.
 - **Records** (`records/*.js`): one file per style. Everything that makes a style sound like itself.
 - **Toolbox** (`lib/*.js`): shared, style-agnostic building blocks. Records reach it as `a.lib`:
   - `lib/theory.js`: scales, chord types, key names, folding a root into a register, mtof.
   - `lib/instruments.js`: sound generators driven by preset data (synth, kick, snare, hat), load-conscious.
   - `lib/parts.js`: chord + key + pattern -> the note events of one bar (drum, bass, chords, arp, melody).
+  - `lib/fx.js`: "character", built once per graph: stereo placement per channel, a short room, soft saturation,
+    slow pitch drift and filter sweep (a constant cost, not per note).
 
 Test for where polish belongs: if a second style would want it unchanged, it goes in the engine or toolbox;
 if it would differ per style, it is style data.
@@ -28,11 +42,12 @@ if it would differ per style, it is style data.
 Deployed (GitHub Pages):
 
     index.html              the engine
-    service-worker.js       cache-first offline support (bump CACHE_NAME on every deploy; currently v2.3.0)
+    service-worker.js       cache-first offline support (bump CACHE_NAME on every deploy; currently v2.3.1)
     styles.css, manifest.json, app-icons/     unchanged since the start
-    lib/theory.js, lib/instruments.js, lib/parts.js    the toolbox (loaded in that order, before any record)
+    lib/theory.js, lib/instruments.js, lib/parts.js, lib/fx.js    the toolbox (loaded in that order, before any record)
     records/chillwave.js    the production style (see roadmap: it will be rebuilt in Step 10)
-    records/pulse.js        the toolbox TEST BENCH (kick, snare, hats, bass, arp, lead; keyed). Delete its <script> tag to remove it.
+    records/pulse.js        the toolbox TEST BENCH (kick, snare, hats, bass, arp, lead; keyed; 21 pulldowns: every sound and
+                            pattern, an Octave pulldown for bass/arp/lead, and Width/Space/Warmth/Motion). Delete its <script> tag to remove it.
 
 Test kit (NOT deployed, lives in `tools/`):
 
@@ -79,17 +94,18 @@ Test kit (NOT deployed, lives in `tools/`):
    `fetch(url, { cache: "reload" })` on purpose (GitHub Pages serves a 10-minute HTTP cache; `cache.addAll`
    can precache stale files).
 7. **Records load after the toolbox**, in `<script src>` tag order: `lib/theory.js`, `lib/instruments.js`,
-   `lib/parts.js`, then records. The first record is the default style; Chillwave stays first.
+   `lib/parts.js`, `lib/fx.js`, then records. The first record is the default style; Chillwave stays first.
 8. **Anything a style's graph leaves running must be stopped.** The toolbox's instruments with vibrato own a running
-   oscillator; a record's `buildGraph` must return an object with a `dispose()` that disposes its instruments (the
-   engine calls it on teardown). Otherwise every Stop leaks an oscillator. The harness checks this.
+   oscillator, and `lib/fx.js` runs slow drift and sweep oscillators; a record's `buildGraph` must return an object with a
+   `dispose()` that disposes its instruments AND its fx (the engine calls it on teardown). Otherwise every Stop leaks
+   oscillators. The harness checks this.
 9. **Small steps, each verified, each ending with a phone test.** Never change behaviour and structure in the same step.
 
 ## 6. How to verify (run from the project root; needs Node)
 
     node tools/trace.js check index.html            full check (scenarios, properties, lints, unit tests, budgets)
     node tools/trace.js check index.html --baseline only the scenarios derived from the user's ORIGINAL app
-    node tools/trace.js unit index.html             unit tests for the toolbox (about 520,000 checks)
+    node tools/trace.js unit index.html             unit tests for the toolbox (33 groups, about 540,000 checks)
     node tools/trace.js load <scenario> index.html  the audio load of a scenario (see below)
     node tools/trace.js record-extra index.html     (re)record the answer key for the NEW-feature scenarios
     node tools/trace.js dump <scenario> index.html  print one trace
@@ -105,7 +121,7 @@ What the answer key means:
 - 26 "original-derived" scenarios were recorded ONCE from the user's verbatim original `index.html` (not shipped; the user
   has it). They prove engine changes do not alter a style. They run against the frozen `tools/test-records/chillwave-classic.js`.
   **Do not run `record --force`** unless the user supplies the original file again.
-- The rest (about 44 now) were recorded from later builds with `record-extra`: they protect new features against regression.
+- The rest (about 52 now) were recorded from later builds with `record-extra`: they protect new features against regression.
 - `production-*` scenarios prove the shipped Chillwave equals the frozen copy. **Retire them in Step 10.**
 - Property checks: loading extra records (or broken ones, or a missing toolbox) must leave Chillwave's audio events identical.
 
@@ -114,20 +130,24 @@ Scenario fields worth knowing: `records` / `fixtures` / `libs` (what to load), `
 from the trace: e.g. every bass note is a chord root in the key; no oscillator left unstopped), `budget` and `reportLoad`.
 
 **Load** (what a phone has to keep up with): oscillators created per second, peak simultaneous oscillators, per-note filters
-per second. Reference numbers: Chillwave today 4.4 osc/s, peak 15, no per-note filters. Pulse bench defaults 11.6 osc/s,
-peak 11, 5.1 filters/s. Pulse busiest options 23.3 osc/s, peak 18. Synth Radio's Chillwave (which glitched on the phone):
-13.4 osc/s, peak ~50, ~7 per-note filters/s. Budgets set so far: Pulse defaults must stay within 12 osc/s, peak 30,
-6 filters/s; classic Chillwave within 5 osc/s, peak 16. **The original promise (9 osc/s) did not hold for a style with
-kick, snare, hats, bass, arp and lead; the budget was set at the measured value plus headroom and should be revisited
-after the user's phone tests.**
+per second, and persistent graph nodes. Reference numbers: Chillwave today 4.4 osc/s, peak 15, no per-note filters; its
+pad is the cost (avg 7 oscillators sounding at once, peak 9, because each pad note lasts ~4.5 s), melody and drums are light.
+Pulse bench: character off + octaves Normal 11.8 osc/s, peak 14; DEFAULTS (low layers on bass and lead, character on)
+14.9 osc/s, peak 18, 5.1 filters/s, 58 persistent nodes (the character stage added 44: 28 gains, 9 panners, 4 delays,
+5 filters, a shaper, 3 oscillators; they keep running even when a pulldown is Off); busiest options 26.7 osc/s, peak 25.
+Synth Radio's Chillwave (which glitched on the phone): 13.4 osc/s, peak ~50, ~7 per-note filters/s. Budgets set: Pulse defaults
+within 16 osc/s, peak 30, 6 filters/s, 70 graph nodes; classic Chillwave within 5 osc/s, peak 16. **The original promise (9 osc/s)
+did not hold for a style with kick, snare, hats, bass, arp and lead; budgets are set at measured value plus headroom and should
+be revisited after the user's phone tests. The persistent-node cost of the fx stage has NOT been measured on a phone.**
 
 Practice that found real bugs: after each step, **break the code on purpose** (mutation testing) and confirm the checks
-fail. Every survivor is either a real gap (fix the harness) or provably harmless. About 150 mutants have been run across
-Steps 1-9. Known harmless survivors: the `reset()` call in `switchStyle` (redundant, `startBeat` resets again); `reset()`
+fail. Every survivor is either a real gap (fix the harness) or provably harmless. About 180 mutants have been run across
+Steps 1-9a. Known harmless survivors: the `reset()` call in `switchStyle` (redundant, `startBeat` resets again); `reset()`
 clearing the remembered chord (unobservable); the "swap with last index" rule in Radio's drums-first constraint (only
 differs with 4+ channels). Harness gaps found by mutation and since closed: app timers (saving was unobservable), connections
 to audio PARAMETERS (vibrato was invisible), reference-table typos (tests compared a table with itself), a Radio "key never
-repeats" check that could miss, the radio plan being invisible.
+repeats" check that could miss, the radio plan being invisible. Found in Step 9a: `fx.set` re-sent every parameter on any change
+(caught by a verify check, fixed to send only what changed); and a connectivity check now asserts every graph node reaches the output.
 Gaps the harness cannot cover (needs the real phone): the Worker timer, screen lock and backgrounding, the silent `<audio>`
 element, real sound quality and loudness balance. The user listens; the harness proves the notes are right, not that they sound good.
 
@@ -148,6 +168,15 @@ element, real sound quality and loudness balance. The user listens; the harness 
   instrument (not per note), a shared filter unless a preset has a filter envelope, oscillators wired straight to the amp
   unless their levels differ, drum filters built once. Drums of a style are `kick`/`snare`/`hat` instruments on a channel.
 
+- **Step 9a decisions (the user's answers):** voices that Step 10 adds should open ON with the user able to toggle them off;
+  the character tools (width, space, warmth, motion) and octave options were auditioned on Pulse first, and the user decides after
+  testing which carry into Step 10. Radio leaves the Octave and character pulldowns alone (taste, not song variation).
+- **Step 10 constraint from the user:** preserve Chillwave's sound as much as possible, but see whether an octave-lower voice
+  can be added to the bass and/or pad without over-taxing the system. If trimming is needed to make the sound richer,
+  DISCUSS IT BEFORE CODING.
+- The user hears Pulse as structurally great (loves the rhythm variety per part; it feels organic) but "keyboard from a yard sale"
+  in timbre: raw, static, dry, mono. Hence octave layers and the character stage.
+
 ## 8. Open decisions and known leftovers
 
 - **`variation` (dormant engine code):** an earlier version muted channels for a few bars (breakdowns), controlled by a
@@ -163,6 +192,9 @@ element, real sound quality and loudness balance. The user listens; the harness 
   with 3+ channels. Radio treats channels individually; with 6+ channels the intro/outro may eat the whole track.
   Likely needs "Radio groups" (Step 11).
 - Dropdown labels use Roman numerals; the text in parentheses doubles as the lock-screen title.
+- **`variation` recollection (user):** instruments went silent for 4 or 8 bars at a time, randomly, during the body of a track.
+  Consistent with the dormant code (decisions at phrase starts, a weighted list of channels to mute, a bar count); the original
+  bar-length constants no longer exist so 4/8 is unconfirmed. To be rebuilt later as a record capability on `a.muted()`.
 - Bug found and fixed in Step 9 (shared with Synth Radio): the melody part produced `undefined` notes when a chord had no
   tone inside the scale (e.g. a chromatic chord). It now falls back to any scale note; a regression test covers it.
 
@@ -173,20 +205,37 @@ Done: 1 seedable RNG + trace harness. 2 Chillwave voices into the record. 3 audi
 7 records as separate files, loader, record contract, Pulse. 8 keys in the engine, `lib/theory.js`, frozen classic fixture.
 9 `lib/instruments.js` and `lib/parts.js`; Pulse rebuilt as the test bench; `dispose()` hook and `needs` rule in the engine;
 load report and budgets, unit tests and preset smoke test in the harness.
+9a `lib/fx.js` (character: width, space, warmth, motion), the octave-lower layer option on instruments, Pulse octave and character
+pulldowns; graph-connectivity and oscillator-count checks.
 
 Next:
-- **Step 10: rebuild Chillwave as a keyed style on the toolbox**, with bass, arps and stepwise melodies (and a pad). First step
-  where Chillwave's sound changes (and where Chillwave gets keys). Its progressions become `{ r, t }` degrees; voicings start
-  as root-position stacks, so consider inversions / open spreads in `lib/parts.js` so it does not lose its hand-voiced
-  lushness. Choose presets and tune against the load budget on the phone. Retire the `production-*` scenarios. The user's
-  ears decide. Before building: review the Pulse bench feedback from the phone (which sounds, patterns and levels worked).
+- **Step 10: rebuild Chillwave as a keyed style on the toolbox.** Plan agreed in outline; the details below were analysed but
+  NOT yet approved for coding. Ask the user for the Step 9a / Pulse feedback first (which character tools and octave layers they
+  kept, and how the bone-conduction headphones handled the lows).
+  - *Preserve the sound:* keep Chillwave's own pad, melody and drum voice code unchanged (do NOT swap to toolbox presets: raw
+    presets are what made Pulse sound like a keyboard). Make Chillwave keyed with chords as degrees + chord types.
+    Of Chillwave's 20 hand-voiced chords, 18 are plain stacks matching a toolbox chord type exactly (lowest note = root; roots span
+    MIDI 45-57); one (Am9 at A2) sits below the usual root window and needs an octave offset; 2 are hand voicings needing an explicit
+    shape field (turnaround chord 4 `F3 G3 B3 E4`, intervals [0,2,6,11]; sway chord 2 `E3 G3 B3 D4 G4`, [0,3,7,10,15]).
+    Then in the key of C with every new voice off, the pad, melody and drums should be provably identical to the classic copy
+    (the harness can assert this with `sameEventsAs`); every audible difference is something the user chose.
+  - *New voices (default ON, toggleable):* a bass part with an octave-lower layer; a pad low layer as a pulldown Off / Root only /
+    Full chord. Estimated cost at Chillwave's tempo (to be MEASURED before shipping): bass with low layer +~2 osc/s (peak +3);
+    pad root-only +~1.5 oscillators sounding (peak +2); pad full chord +~7 sounding (peak ~+9, the heavy option). Bass plus
+    root-only pad stays inside the original 9 osc/s / peak 30 promise. Low layers should be triangle or soft saw (overtones) as
+    well as sine, for the user's headphones. If trimming is ever needed (shorter pad release tail, dropping the fifth note of
+    9th chords), those change Chillwave's sound: discuss before coding.
+  - Optional and off-by-default candidates: arp, stepwise melody as an alternative to the classic random chord-tone melody,
+    the fx character stage (if the user keeps it after testing on Pulse).
+  - Retire the `production-*` scenarios (the shipped Chillwave stops equalling the frozen copy; keep the frozen copy for
+    engine/toolbox regression).
 - **Step 11: Radio groups** (channels that enter/leave together), so intros/outros do not eat the track.
 - **Step 12: cleanup and hardening:** decide `variation`; remove leftovers (`reverb`, maybe the old-settings migration if the
-  user confirms); a performance tuning pass on the phone.
+  user confirms); a performance tuning pass on the phone (including the cost of the fx stage's persistent nodes).
 - **Then new styles** (Synthwave, Darksynth, Dubstep): each a data file plus a script tag with no engine edits. Anything a
   style needs that the toolbox lacks (a wobble bass, breakdowns) is added once, generally.
 - Unscheduled ideas: a cheap reverb substitute, song sections like Synth Radio's, UI polish, splitting the engine's inline
-  script into files.
+  script into files, bypassing the fx stage's nodes when everything is Off.
 
 ## 10. Reference: what was learned reading Synth Radio (do not repeat these in Chillforge)
 
@@ -202,7 +251,7 @@ Next:
 ## 11. How the user likes to work
 
 - Step by step, each step verified and then tried on the phone before the next. Big steps: propose a plan first
-  and wait for approval.
+  and wait for approval. If a change would alter an existing sound or trim something, discuss it before coding.
 - Wants evidence over assertion: say what was tested, what was broken on purpose, and what could not be verified.
   If a promise (like a budget) turns out wrong, say so plainly.
 - Is comfortable with duplicating code across styles when it keeps things simple, but not with rebuilding instruments or

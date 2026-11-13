@@ -1,4 +1,4 @@
-const CACHE_NAME = "chillforge-cache-v2.3.0";
+const CACHE_NAME = "chillforge-cache-v2.3.1";
 
 const APP_SHELL = [
   "./",
@@ -7,6 +7,7 @@ const APP_SHELL = [
   "./lib/theory.js",
   "./lib/instruments.js",
   "./lib/parts.js",
+  "./lib/fx.js",
   "./records/chillwave.js",
   "./manifest.json",
   "./app-icons/app-icon-192.png",

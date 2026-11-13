@@ -21,7 +21,7 @@
 const fs = require("fs"), path = require("path"), vm = require("vm"), crypto = require("crypto");
 
 const GOLDEN = path.join(__dirname, "trace-golden.json");
-const LIBS = ["lib/theory.js", "lib/instruments.js", "lib/parts.js"];   // shared toolbox files the real page loads before any record
+const LIBS = ["lib/theory.js", "lib/instruments.js", "lib/parts.js", "lib/fx.js"];   // shared toolbox files the real page loads before any record
 const CORE = ["records/chillwave.js"];      // the production default style (the page's first record)
 const CLASSIC = "chillwave-classic.js";     // frozen copy of Chillwave in test-records/: what the original-derived scenarios run against
 const TICK = 0.05;                     // same as TICK_MS in the app
@@ -60,12 +60,43 @@ function bassMidis(text, gainId) {
   });
   return Array.from(byStart.values()).map((f) => 69 + 12 * Math.log2(f / 440));
 }
+// Every persistent audio node must have a path to the output (an unconnected node means silent or lost audio).
+// Oscillators and the nodes that only modulate a parameter (shown as `<-id` in the graph lines) are exempt.
+const graphConnected = (text) => {
+  const nodes = [], mods = new Set(), edges = new Map();
+  text.split("\n").forEach((l) => {
+    (l.match(/<-[^\s]+/g) || []).forEach((x) => x.slice(2).split(",").forEach((id) => mods.add(id)));   // modulation sources (on graph lines AND on notes)
+    let m = /^graph (\S+)/.exec(l);
+    if (m) nodes.push(m[1]);
+    m = /^edge (\S+) -> (\S+)$/.exec(l);
+    if (m) { if (!edges.has(m[1])) edges.set(m[1], []); edges.get(m[1]).push(m[2]); }
+  });
+  const reaches = (from) => { const seen = new Set([from]), st = [from]; while (st.length) { const x = st.pop(); (edges.get(x) || []).forEach((y) => { if (!seen.has(y)) { seen.add(y); st.push(y); } }); } return seen.has("dest"); };
+  const bad = nodes.filter((id) => id !== "dest" && id.indexOf("osc#") !== 0 && !mods.has(id) && !reaches(id));
+  return bad.length ? ["these graph nodes never reach the output (a missing connection?): " + bad.slice(0, 6).join(", ")] : [];
+};
+// How many oscillators each note played into a channel has (grouped by start time).
+function oscCounts(text, gainId) {
+  const feed = feeders(text, gainId), byStart = new Map();
+  text.split("\n").forEach((l) => {
+    const st = /@([0-9.eE+-]+)\.\./.exec(l);
+    if (!/^osc \S+ f\[v=/.test(l) || !st || !feed.has(l.split(" -> ").pop())) return;
+    byStart.set(st[1], (byStart.get(st[1]) || 0) + 1);
+  });
+  return Array.from(byStart.values());
+}
+const bassOscCheck = (n) => (text) => {
+  const c = oscCounts(text, "gain#4"), bad = c.filter((x) => x !== n);
+  return !c.length ? ["no bass notes found"] : bad.length ? [bad.length + " bass note(s) did not have exactly " + n + " oscillators (first one had " + bad[0] + ")"] : [];
+};
+const both = (...fs) => (text) => [].concat(...fs.map((f) => f(text)));
 const noLeaks = (text) => {            // every oscillator must have been stopped (an unstopped one is a leak)
   const bad = text.split("\n").filter((l) => /^osc .*@\S+\.\.\? /.test(l));
   return bad.length ? [bad.length + " oscillator(s) were never stopped (a vibrato oscillator the style forgot to dispose?)"] : [];
 };
 // In one fixed key, Pulse's "Pump" bass must only play that key's four chord roots, whole semitones, in MIDI 40-51.
-const pulseKeyCheck = (key) => (text) => {
+const pulseKeyCheck = (key, lo, hi) => (text) => {
+  lo = lo === undefined ? 40 : lo; hi = hi === undefined ? 51 : hi;
   const P = [], ms = bassMidis(text, "gain#4");
   if (!ms.length) return ["no bass notes found in the trace"];
   const want = new Set([0, 8, 3, 10].map((r) => (key + r) % 12)), seen = new Set();
@@ -74,10 +105,25 @@ const pulseKeyCheck = (key) => (text) => {
     if (Math.abs(m - r) > 1e-6) P.push("bass note " + m.toFixed(4) + " is not a whole semitone");
     else if (!want.has(pc)) P.push("bass note " + KEYS[pc] + " is not a chord root in key " + KEYS[key]);
     else seen.add(pc);
-    if (r < 40 || r > 51) P.push("bass note MIDI " + r + " is outside the 40-51 register window");
+    if (r < lo || r > hi) P.push("bass note MIDI " + r + " is outside the " + lo + "-" + hi + " register window");
   });
   want.forEach((pc) => { if (!seen.has(pc)) P.push("chord root " + KEYS[pc] + " (key " + KEYS[key] + ") was never played"); });
   return Array.from(new Set(P)).slice(0, 4);
+};
+const fxLiveCheck = (text) => {
+  const P = [], lines = text.split("\n");
+  const pan = (id) => lines.map((l) => new RegExp("^param " + id + "\\.pan tgt\\((-?[0-9.eE+-]+)@").exec(l)).filter(Boolean).map((m) => parseFloat(m[1]));
+  const arp = pan("panner#4"), lead = pan("panner#5");
+  if (JSON.stringify(arp) !== "[-0.6,0]") P.push("arp pan moved " + JSON.stringify(arp) + ", expected [-0.6,0] (Wide, then Off)");
+  if (JSON.stringify(lead) !== "[0.6,0]") P.push("lead pan moved " + JSON.stringify(lead) + ", expected [0.6,0] (Wide, then Off)");
+  const i = lines.indexOf("== action: space off");
+  if (i < 0) P.push("the 'space off' action did not run");
+  else {
+    let n = 0;
+    for (let j = i + 1; j < lines.length && lines[j].indexOf("== action") !== 0; j++) if (/^param \S+\.gain tgt\(0@/.test(lines[j])) n++;
+    if (n < 8) P.push("'space off' silenced only " + n + " nodes (expected 3 sends, the wet level and 4 comb feedbacks)");
+  }
+  return P;
 };
 // Radio: the key in each track title must change every time (never the same twice in a row)
 const radioKeyCheck = (text) => {
@@ -160,7 +206,7 @@ const SCENARIOS = [
         chillwave: { bpm: 60 } } }) } },
   // ---- keys, proven on Pulse ----
   ...Array.from({ length: 12 }, (_, k) => ({ name: "pulse-key-" + k, seed: 300 + k, duration: 20, records: ["records/pulse.js"],
-    storage: { "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { key: k } } }) }, verify: pulseKeyCheck(k) })),
+    storage: { "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { key: k, sel: { bassOctave: "normal" } } } }) }, verify: pulseKeyCheck(k) })),
   { name: "pulse-key-live", seed: 320, duration: 44, records: ["records/pulse.js"], setup: (h) => h.select("styleSelect", "pulse"), actions: [
     { at: 10, name: "key to F",  run: (h) => h.select("keySelect", "5") },
     { at: 20, name: "key to A",  run: (h) => h.select("keySelect", "9") },
@@ -185,13 +231,35 @@ const SCENARIOS = [
     actions: Array.from({ length: 40 }, (_, i) => ({ at: 9 + i * 9, name: "next track " + (i + 1), run: (h) => h.click("nextBtn") })) },
   { name: "pulse-without-toolbox", seed: 2, duration: 40, records: ["records/pulse.js"], noLib: true, sameEventsAs: "default-seed2" },
   // ---- the toolbox, proven on Pulse ----
-  { name: "bench-defaults", seed: 400, duration: 60, records: ["records/pulse.js"], budget: { oscPerSec: 12, peakOsc: 30, noteFiltersPerSec: 6 }, setup: (h) => h.select("styleSelect", "pulse") },
-  { name: "bench-options", seed: 401, duration: 90, records: ["records/pulse.js"], setup: (h) => h.select("styleSelect", "pulse"),
+  { name: "bench-defaults", seed: 400, duration: 60, records: ["records/pulse.js"], verify: graphConnected, budget: { oscPerSec: 16, peakOsc: 30, noteFiltersPerSec: 6, graphNodes: 70 }, setup: (h) => h.select("styleSelect", "pulse") },
+  { name: "bench-options", seed: 401, duration: 142, records: ["records/pulse.js"], setup: (h) => h.select("styleSelect", "pulse"),
     // plays every option of every pulldown in turn (read from the live record, so a new option is covered automatically)
-    actions: Array.from({ length: 32 }, (_, i) => ({ at: 4 + i * 2.6, name: "option " + (i + 1), run: (h) => {
+    actions: Array.from({ length: 54 }, (_, i) => ({ at: 4 + i * 2.5, name: "option " + (i + 1), run: (h) => {
       const pairs = JSON.parse(h.eval("JSON.stringify((function () { var o = []; STYLES.pulse.selects.forEach(function (s) { s.options.forEach(function (op) { o.push([s.label + ' sound', op[0]]); }); }); return o; })())"));
       if (pairs[i]) h.select(pairs[i][0], pairs[i][1]);
     } })) },
+  // ---- octaves and character (Step 9a) ----
+  { name: "bench-bass-normal", seed: 420, duration: 22, records: ["records/pulse.js"], verify: both(pulseKeyCheck(0, 40, 51), bassOscCheck(2)), storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { bassOctave: "normal" } } } }) } },
+  { name: "bench-bass-down", seed: 421, duration: 22, records: ["records/pulse.js"], verify: both(pulseKeyCheck(0, 28, 39), bassOscCheck(2)), storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { bassOctave: "down" } } } }) } },
+  { name: "bench-bass-low-triangle", seed: 422, duration: 22, records: ["records/pulse.js"], verify: both(pulseKeyCheck(0, 28, 39), bassOscCheck(3)), storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { bassOctave: "layerTri" } } } }) } },
+  { name: "bench-bass-low-sine", seed: 423, duration: 22, records: ["records/pulse.js"], verify: both(pulseKeyCheck(0, 28, 39), bassOscCheck(3)), storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { bassOctave: "layerSine" } } } }) } },
+  { name: "bench-character-off", seed: 424, duration: 40, records: ["records/pulse.js"], reportLoad: true, verify: graphConnected, storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { bassOctave: "normal", arpOctave: "normal", leadOctave: "normal", width: "off", space: "off", warmth: "off", motion: "off" } } } }) } },
+  { name: "bench-character-max", seed: 425, duration: 40, records: ["records/pulse.js"], reportLoad: true, verify: graphConnected, storage: {
+      "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { bassOctave: "layerTri", arpOctave: "layer", leadOctave: "layer", width: "wide", space: "hall", warmth: "tape", motion: "both" } } } }) } },
+  { name: "bench-fx-live", seed: 426, duration: 50, records: ["records/pulse.js"], verify: fxLiveCheck, setup: (h) => h.select("styleSelect", "pulse"), actions: [
+    { at: 6,  name: "width wide",  run: (h) => h.select("Width sound", "wide") },
+    { at: 12, name: "width off",   run: (h) => h.select("Width sound", "off") },
+    { at: 18, name: "space hall",  run: (h) => h.select("Space sound", "hall") },
+    { at: 24, name: "space off",   run: (h) => h.select("Space sound", "off") },
+    { at: 30, name: "warmth tape", run: (h) => h.select("Warmth sound", "tape") },
+    { at: 36, name: "motion both", run: (h) => h.select("Motion sound", "both") },
+    { at: 42, name: "motion off",  run: (h) => h.select("Motion sound", "off") } ] },
+  { name: "pulse-needs-fx", seed: 2, duration: 40, records: ["records/pulse.js"], libs: ["lib/theory.js", "lib/instruments.js", "lib/parts.js"], sameEventsAs: "default-seed2" },
   { name: "bench-busiest", seed: 402, duration: 40, records: ["records/pulse.js"], reportLoad: true, storage: {
       "chillforge-v3": JSON.stringify({ style: "pulse", store: { pulse: { sel: { kickSound: "punchy", snareSound: "clap", hatSound: "dusty",
         bassSound: "warmSaw", arpSound: "glassy", arpLine: "run", leadSound: "dreamySquare" } } } }) } },
@@ -323,6 +391,16 @@ function runScenario(sc, html, appDir) {
     constructor() { super("comp"); this.threshold = new Param(this, "threshold", -24); this.ratio = new Param(this, "ratio", 12); }
     _params() { return [this.threshold, this.ratio]; }
   }
+  class MPanner extends MNode {
+    constructor() { super("panner"); this.pan = new Param(this, "pan", 0); }
+    _params() { return [this.pan]; }
+  }
+  class MShaper extends MNode {
+    constructor() { super("shaper"); this._curve = null; this.oversample = "none"; }
+    set curve(v) { this._curve = v; }
+    get curve() { return this._curve; }
+    _info() { return " curve=" + (this._curve ? sha10(Buffer.from(this._curve.buffer, this._curve.byteOffset, this._curve.byteLength)) : "none"); }
+  }
   class MDelay extends MNode {
     constructor(max) { super("delay"); this.max = max; this.delayTime = new Param(this, "delayTime", 0); }
     _params() { return [this.delayTime]; }
@@ -381,6 +459,8 @@ function runScenario(sc, html, appDir) {
     createBiquadFilter() { return new MBiquad(); }
     createDynamicsCompressor() { return new MComp(); }
     createDelay(max) { return new MDelay(max); }
+    createStereoPanner() { return new MPanner(); }
+    createWaveShaper() { return new MShaper(); }
     createBufferSource() { return new MSrc(); }
     createBuffer(ch, len, rate) {
       return { numberOfChannels: ch, length: len, sampleRate: rate,
@@ -479,7 +559,7 @@ function runScenario(sc, html, appDir) {
   const flushGraph = () => {
     for (; flushedN < H.nodes.length; flushedN++) {
       const n = H.nodes[flushedN];
-      emit("graph " + n._id + n._info() + n._params().map((p) => " " + p.name + "[" + pl(p) + "]").join(""));
+      emit("graph " + n._id + n._info() + n._params().map((p) => " " + p.name + "[" + pl(p) + "]" + (p._mods.length ? "<-" + p._mods.join(",") : "")).join(""));
       n._flushed = true;
     }
     for (; flushedE < H.edges.length; flushedE++) emit("edge " + H.edges[flushedE]);
@@ -586,7 +666,7 @@ function runScenario(sc, html, appDir) {
   };
   const oscV = voices.filter((v) => v.kind === "osc"), srcV = voices.filter((v) => v.kind === "src");
   const load = { seconds: r1(secs), oscPerSec: r1(oscV.length / secs), peakOsc: sweep(oscV), srcPerSec: r1(srcV.length / secs), peakSrc: sweep(srcV),
-    noteFiltersPerSec: r1((H.tickCount.biquad || 0) / secs), noteGainsPerSec: r1((H.tickCount.gain || 0) / secs) };
+    noteFiltersPerSec: r1((H.tickCount.biquad || 0) / secs), noteGainsPerSec: r1((H.tickCount.gain || 0) / secs), graphNodes: H.nodes.length };
   if (sc.budget) Object.keys(sc.budget).forEach((kk) => { if (load[kk] > sc.budget[kk]) problems.push("load budget exceeded: " + kk + " " + load[kk] + " > " + sc.budget[kk]); });
 
   const state = h.eval("JSON.stringify({ step: step, chordIdx: (typeof barIdx !== 'undefined' ? barIdx : chordIdx), bpm: S.bpm, prog: S.prog, sel: S.sel, vol: S.vol, " +
@@ -837,6 +917,73 @@ function unitTests(appDir) {
     });
     test("instruments: mtof agrees with theory.mtof for every MIDI note", (eq) => { for (let m = 0; m <= 127; m++) eq(IN.mtof(m) === T.mtof(m), "mtof(" + m + ") differs: " + IN.mtof(m) + " vs " + T.mtof(m)); });
     test("instruments: frozen", (eq) => { eq(Object.isFrozen(IN) && Object.isFrozen(IN.PRESETS) && Object.isFrozen(IN.PRESETS.bass.subSine.p.osc[0]), "instruments are not frozen"); });
+  }
+
+  // ================= instruments: options =================
+  if (IN && IN.validateOpts) {
+    test("instruments: the `low` option is validated, and only for tonal instruments", (eq) => {
+      eq(IN.validateOpts("bass", undefined).length === 0, "no options should be fine");
+      eq(IN.validateOpts("bass", { low: { type: "triangle", gain: 0.7 } }).length === 0, "a good low layer was rejected: " + IN.validateOpts("bass", { low: { type: "triangle", gain: 0.7 } }).join("; "));
+      ["pad", "lead", "arp"].forEach((c) => eq(IN.validateOpts(c, { low: { type: "sine", gain: 0.5 } }).length === 0, c + " should accept a low layer"));
+      [["kick", { low: { type: "sine", gain: 0.5 } }, "a low layer on a kick"], ["hat", { low: { type: "sine", gain: 0.5 } }, "a low layer on a hat"],
+       ["bass", { low: { type: "noise", gain: 0.5 } }, "an unknown waveform"], ["bass", { low: { type: "sine", gain: 2 } }, "a gain above 1"],
+       ["bass", { low: { type: "sine", gain: 0 } }, "a zero gain"], ["bass", { low: { type: "sine" } }, "a missing gain"],
+       ["bass", { low: { type: "sine", gain: 0.5, mult: 2 } }, "an unknown low field"], ["bass", { wobble: 1 }, "an unknown option"], ["bass", 5, "a non-object"]
+      ].forEach(([c, o, why]) => eq(IN.validateOpts(c, o).length > 0, "validateOpts accepted " + why));
+    });
+    test("instruments: make passes options through and rejects bad ones with a readable error", (eq) => {
+      const fake = { ctx: {}, noise: {}, rng: () => 0, applyShape: () => {} };
+      let m = ""; try { IN.make(fake, {}, "kick", "softThump", { low: { type: "sine", gain: 0.5 } }); } catch (e) { m = e.message; }
+      eq(m.indexOf("low") !== -1 && m.indexOf("kick") !== -1, "make(kick, low) should throw a readable error, got '" + m + "'");
+    });
+  }
+  // ================= fx =================
+  const FX = ctx.window.CHILLFORGE_LIB.fx;
+  if (FX) {
+    test("fx: the saturation curve has slope 1 at the origin, is odd, monotone and bounded by 1/k", (eq) => {
+      [0, 0.5, 1, 2.5, 6].forEach((k) => {
+        const c = FX.curve(k, 1025), n = c.length, mid = (n - 1) / 2;
+        eq(n === 1025, "length " + n);
+        eq(Math.abs(c[mid]) < 1e-6, "k=" + k + ": curve(0) = " + c[mid]);
+        const slope = (c[mid + 1] - c[mid - 1]) / (2 * (2 / (n - 1)));
+        eq(Math.abs(slope - 1) < 1e-3, "k=" + k + ": slope at 0 is " + slope + ", not 1 (quiet signals must pass untouched)");
+        for (let i = 0; i < n; i++) {
+          eq(Math.abs(c[i] + c[n - 1 - i]) < 1e-6, "k=" + k + ": not odd-symmetric at " + i);
+          if (i) eq(c[i] >= c[i - 1] - 1e-9, "k=" + k + ": not monotone at " + i);
+          eq(Math.abs(c[i]) <= (k === 0 ? 1 : 1 / k) + 1e-6, "k=" + k + ": exceeds its bound at " + i);
+        }
+      });
+    });
+    test("fx: params maps amounts to node values (off means off, monotone, stable feedback, clamped, finite only)", (eq) => {
+      const off = FX.params({});
+      eq(off.panScale === 0 && off.sendOn === 0 && off.spaceWet === 0 && off.feedback === 0 && off.satWet === 0 && off.satDry === 1 && off.driftCents === 0 && off.sweepDepth === 0 && off.toneFreq === FX.TONE_OPEN, "all-off settings are not silent/neutral: " + J(Object.keys(off).map((k) => off[k])));
+      const keys = ["width", "space", "warmth", "drift", "sweep"];
+      let prev = null;
+      for (let i = 0; i <= 20; i++) {
+        const v = i / 20, p = FX.params({ width: v, space: v, warmth: v, drift: v, sweep: v });
+        eq(p.feedback < 0.9 && p.feedback <= 0.5 + 1e-12, "feedback " + p.feedback + " at " + v + " (must stay far below 1 or the space blows up)");
+        eq(p.spaceWet <= 0.32 + 1e-12 && p.satDry >= 0 && p.satWet <= 1 && Math.abs(p.satDry + p.satWet - 1) < 1e-12, "level out of range at " + v);
+        if (prev) { eq(p.panScale >= prev.panScale && p.spaceWet >= prev.spaceWet && p.satWet >= prev.satWet && p.driftCents >= prev.driftCents && p.sweepDepth >= prev.sweepDepth && p.satDry <= prev.satDry, "not monotone at " + v); }
+        prev = p;
+      }
+      eq(FX.params({ width: 5, space: -2 }).panScale === 1 && FX.params({ width: 5, space: -2 }).spaceWet === 0, "out-of-range amounts were not clamped");
+      keys.forEach((k) => { [NaN, Infinity, "0.5", null].forEach((bad) => { let m = ""; try { FX.params({ [k]: bad }); } catch (e) { m = e.message; } eq(m.indexOf("finite") !== -1, k + "=" + bad + " should throw a readable error, got '" + m + "'"); }); });
+    });
+    test("fx: the space's delay lengths are sane and avoid simple ratios (which ring like a tube)", (eq) => {
+      const d = FX.COMBS.map((c) => c.delay);
+      eq(d.length === 4 && d.every((x) => x >= 0.01 && x <= 0.2 && Number.isFinite(x)), "delays " + J(d));
+      eq(J(d.slice().sort((a, b) => a - b)) === J(d) && new Set(d).size === d.length, "delays should ascend and differ");
+      for (let i = 0; i < d.length; i++) for (let j = i + 1; j < d.length; j++) { const r = d[j] / d[i]; eq(Math.abs(r - Math.round(r)) > 0.04, "delays " + d[i] + " and " + d[j] + " are nearly an integer ratio (" + r.toFixed(3) + ")"); }
+      eq(FX.DAMP_HZ > 500 && FX.DAMP_HZ < 8000, "damping frequency " + FX.DAMP_HZ);
+    });
+    test("fx: validateSpec accepts a good spec and rejects bad ones", (eq) => {
+      eq(FX.validateSpec({ channels: ["a", "b"], pan: { a: -0.6 }, send: { b: 0.5 } }).length === 0, "a good spec was rejected");
+      [[{}, "no channels"], [{ channels: [] }, "empty channels"], [{ channels: ["a", "a"] }, "duplicate channels"], [{ channels: ["a"], pan: { z: 0.1 } }, "pan for an unknown channel"],
+       [{ channels: ["a"], pan: { a: 2 } }, "pan above 1"], [{ channels: ["a"], send: { a: -0.1 } }, "a negative send"], [{ channels: ["a"], send: { a: "x" } }, "a non-numeric send"]
+      ].forEach(([sp, why]) => eq(FX.validateSpec(sp).length > 0, "validateSpec accepted " + why));
+      let m = ""; try { FX.create({ ctx: {} }, {}, { channels: [] }); } catch (e) { m = e.message; } eq(m.indexOf("channels") !== -1, "create should throw a readable error, got '" + m + "'");
+    });
+    test("fx: exports are frozen", (eq) => { eq(Object.isFrozen(FX) && Object.isFrozen(FX.COMBS) && Object.isFrozen(FX.COMBS[0]), "fx is not frozen"); });
   }
   return out;
 }

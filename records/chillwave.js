@@ -4,7 +4,7 @@
    This file is two things at once: the Chillwave style, and the reference
    for how to build any other style ("record") for Chillforge.
 
-   Contract last verified against engine build 261107-1321.
+   Contract last verified against engine build 261111-2105.
 
    IF YOU ARE CLAUDE AND YOU WERE GIVEN THIS FILE TO BUILD A NEW STYLE
    ----------------------------------------------------------------------------
@@ -110,7 +110,7 @@
      cutoffMul  1. Multiplies the master lowpass cutoff (2500 Hz). Above 1 opens
                 the highs for brighter styles.
      needs      none. A list of toolbox names the record cannot work without, e.g.
-                ["theory", "instruments", "parts"]. If one did not load, the record
+                ["theory", "instruments", "parts", "fx"]. If one did not load, the record
                 is skipped with a log line instead of crashing later.
      keyed      false. true = a KEYED style: the engine adds a Key pulldown (C to B),
                 saves the choice with the style's settings, gives you a.S.key (0-11,
@@ -148,6 +148,10 @@
                                          env(a), make(e, out, category, id), PRESETS.
                       a.lib.parts        chord + key + pattern -> the note events of one
                                          bar: drum, bass, chords, arp, melody, PATTERNS.
+                      a.lib.fx           "character", built once per graph so it is nearly
+                                         free per note: stereo placement per channel, a
+                                         short room, soft saturation, slow pitch drift and
+                                         filter sweep. create(e, bus, spec), params, curve.
                       For a KEYED style, write chords as { r, t } (r = semitones above
                       the key, t = chord type) so one progression works in every key,
                       and give each instrument its own register through `lo`.
@@ -170,7 +174,8 @@
      oscillator or buffer source needs a .stop(...) so it is freed.
    - Prefer the toolbox's instruments to hand-built voices: they share filters and
      one vibrato oscillator instead of building them per note, which matters on a
-     phone. Anything that keeps running (a shared LFO) must be stopped in dispose().
+     phone. Anything that keeps running (a shared LFO, the fx drift and sweep
+     oscillators) must be stopped in dispose().
    - Channel gain nodes belong to the engine's mixer. Do not set their gain.
      To silence a channel, skip its notes (a.muted), do not touch the gain.
    - Master chain after `bus`: lowpass (2500 Hz x cutoffMul) -> compressor
@@ -250,8 +255,10 @@
    the audio engine for more; `node tools/trace.js load <scenario>` prints the
    numbers), checkSaved (what was really saved), libs (load only some toolbox
    files). `node tools/trace.js unit` tests the toolbox. Reference load: Chillwave
-   today ~4.4 oscillators/s, peak 15 at once; Pulse's defaults ~11.6/s, peak 11,
-   ~5 per-note filters/s. (Synth Radio glitched on the phone at ~13/s, peak ~50.)
+   today ~4.4 oscillators/s, peak 15 at once; Pulse's defaults ~14.9/s, peak 18, ~5
+   per-note filters/s, 58 persistent nodes (44 of them the fx stage, a constant cost that
+   keeps running even when a pulldown is Off). (Synth Radio glitched on the phone at
+   ~13/s, peak ~50.)
    The harness replays the app with a fake audio system and a seeded random
    generator and records every audio call, so any later change shows up as a
    diff. It also lints record files for top-level declarations and checks that
