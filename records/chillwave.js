@@ -403,7 +403,7 @@
     const o = a.ctx.createOscillator();
     const gn = a.ctx.createGain();
     a.applyShape(o, shape);
-    o.frequency.value = a.noteFreq(note) * 2;
+    o.frequency.value = a.noteFreq(note) * 2 * tr(a);
     gn.gain.setValueAtTime(0.0001, t);
     gn.gain.linearRampToValueAtTime(peak, t + 0.03);
     gn.gain.setTargetAtTime(peak * 0.5, t + 0.03, 0.12);
