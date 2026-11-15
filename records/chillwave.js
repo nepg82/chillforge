@@ -480,11 +480,15 @@
       { id: "padShape",    label: "Pad",    def: "triangle",
         options: shapeOpts(["triangle", "softtri", "sine", "sawtooth", "square"]),
         radio: ["sine"] },
+
       { id: "melodyShape", label: "Melody", def: "sine",
         options: shapeOpts(["sine", "softtri", "triangle", "sawtooth", "square"]),
-        radio: ["sine", "softtri", "triangle"] }
+        radio: ["sine", "softtri", "triangle"] },
+      { id: "transpose", label: "Transpose", def: "0",
+        options: [["0", "0 (Original)"], ["-1", "-1 semitone"], ["-2", "-2 semitones"],
+                  ["-3", "-3 semitones"], ["-4", "-4 semitones"], ["-5", "-5 semitones"]] }
     ],
-
+   
     // ---- what the engine calls -------------------------------
 
     // Build this style's audio nodes and feed them into the engine's master bus.
