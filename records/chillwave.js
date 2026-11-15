@@ -413,6 +413,9 @@
     o.stop(t + dur + 0.9);
   }
 
+  // Frequency multiplier for the Transpose pulldown (0 to -5 semitones).
+  const tr = (a) => Math.pow(2, Number(a.S.sel.transpose) / 12);
+
   const rec = {
     label: "Chillwave",
     bpm: { min: 55, max: 95, def: 83 },
