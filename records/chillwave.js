@@ -557,6 +557,7 @@
         const up = a.rng() < a.clamp(0.5 + (rec.bpm.def - S.bpm) / (rec.bpm.max - rec.bpm.min), 0.1, 0.9);
         S.bpm = a.clamp(S.bpm + (up ? 1 : -1) * Math.round(a.rand(2, 5)), rec.bpm.min, rec.bpm.max);
         rec.selects.forEach((s) => {
+          if (s.id === "transpose") return;
           const pool = (s.radio || s.options.map((o) => o[0])).filter((v) => v !== S.sel[s.id]);
           if (pool.length) S.sel[s.id] = pool[Math.floor(a.rng() * pool.length)];
         });
